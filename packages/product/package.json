@@ -1,0 +1,20 @@
+{
+  "name": "@suhbat/product",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Product domain contracts, repository interfaces, and the typed demo adapter for the SUHBAT AI meeting-intelligence UI. No database, no network, no providers.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./demo": {
+      "types": "./src/demo/index.ts",
+      "import": "./src/demo/index.ts"
+    }
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

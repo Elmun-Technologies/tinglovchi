@@ -1,0 +1,13 @@
+node_modules
+.next
+apps/web/next-env.d.ts
+coverage
+package-lock.json
+playwright-report
+blob-report
+test-results
+
+# Generated/binary output that no editor should reformat
+dist/
+**/target/
+apps/desktop/src-tauri/gen/

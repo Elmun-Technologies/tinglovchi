@@ -1,0 +1,22 @@
+[package]
+name = "capture-macos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "macOS capture bridge: AVAudioEngine microphone tap + ScreenCaptureKit system audio, behind the recorder-core CaptureBackend trait. Non-macOS targets compile to a no-op stub."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+recorder-core = { workspace = true }
+
+# The Objective-C bridge is only compiled for macOS; everywhere else `capture_macos` exposes the same API
+# with `available() == false`, so `recorder-core` keeps building (and its tests keep running) on any host.
+[target.'cfg(target_os = "macos")'.build-dependencies]
+cc = "1"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

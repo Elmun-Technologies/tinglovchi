@@ -1,0 +1,28 @@
+{
+  "name": "@suhbat/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./config": {
+      "types": "./src/config.ts",
+      "import": "./src/config.ts"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
+    },
+    "./types": {
+      "types": "./src/database.types.ts",
+      "import": "./src/database.types.ts"
+    }
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
+    "server-only": "0.0.1"
+  },
+  "peerDependencies": {
+    "next": "^16.0.0"
+  }
+}

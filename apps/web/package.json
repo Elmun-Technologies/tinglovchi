@@ -1,0 +1,25 @@
+{
+  "name": "@suhbat/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0 --port 3000"
+  },
+  "dependencies": {
+    "@suhbat/contracts": "0.1.0",
+    "@suhbat/database": "0.1.0",
+    "@suhbat/product": "0.1.0",
+    "@suhbat/shared": "0.1.0",
+    "@suhbat/ui": "0.1.0",
+    "server-only": "0.0.1",
+    "@tailwindcss/postcss": "4.3.3",
+    "lucide-react": "1.52.0",
+    "next": "16.3.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tailwindcss": "4.3.3"
+  }
+}

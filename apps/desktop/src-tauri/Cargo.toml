@@ -1,0 +1,29 @@
+[package]
+name = "suhbat-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "SUHBAT local-first recorder shell (Tauri 2). Owns the window, the session root, and IPC mapping; capture and persistence live in recorder-core."
+
+[lib]
+name = "suhbat_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+recorder-core = { workspace = true }
+
+# Platform isolation: the ScreenCaptureKit/AVFoundation bridge is a macOS-only dependency, so a Windows
+# or Linux build of the workspace still compiles (and fails closed at runtime) instead of half-working.
+[target.'cfg(target_os = "macos")'.dependencies]
+capture-macos = { workspace = true }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

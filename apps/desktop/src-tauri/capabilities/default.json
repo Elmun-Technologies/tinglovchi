@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "recorder-main",
+  "description": "Capabilities for the single recorder window. Only the app's own commands and the event channel are granted: no shell, no fs, no http, no opener plugin exists in this app's dependency graph.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-title",
+    "core:webview:allow-internal-toggle-devtools"
+  ]
+}
