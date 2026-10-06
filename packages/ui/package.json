@@ -1,0 +1,19 @@
+{
+  "name": "@suhbat/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.tsx",
+      "import": "./src/index.tsx"
+    }
+  },
+  "dependencies": {
+    "@suhbat/product": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

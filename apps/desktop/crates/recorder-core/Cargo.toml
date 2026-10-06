@@ -1,0 +1,30 @@
+[package]
+name = "recorder-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Platform-independent SUHBAT recorder core: canonical timeline, capture state machine, durable manifest, chunk finalization, recovery, levels. No network, no database, no provider access."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+
+# Only used for statfs/statvfs capacity queries; the capture APIs themselves live in capture-macos.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+# `clippy::pedantic` is intentionally not enabled for this phase: it is noisy on
+# hardware-gated FFI shims that cannot be compiled on this host, so it would be
+# unverified advice. `all` (correctness/style/complexity/perf) is enforced.
+[lints.clippy]
+all = { level = "warn", priority = -1 }

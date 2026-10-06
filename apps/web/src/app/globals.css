@@ -1,0 +1,175 @@
+@import 'tailwindcss';
+@source '../../../../packages/ui/src';
+
+:root {
+  color-scheme: light;
+  --background: #f7f8fa;
+  --foreground: #142033;
+  --muted: #65748b;
+  --line: #e5e9ef;
+  --surface: #ffffff;
+  --accent: #0f766e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: #ccfbf1;
+  color: #134e4a;
+}
+
+/*
+ * Transcript rows are laid out lazily: a 90-minute meeting renders as cheaply as a 5-minute one, with no client
+ * virtualizer and no scroll listener. `contain-intrinsic-size` keeps the scrollbar honest about the height of
+ * rows that are not on screen yet.
+ */
+.transcript-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 3.75rem;
+}
+
+/*
+ * A citation link carries the segment id as a fragment, so the browser scrolls it into view and this rule marks
+ * it — highlighting that works with no JavaScript and no animation. `data-active` is the same state read from
+ * the query string, for the server-rendered case.
+ */
+.transcript-row:target,
+.transcript-row[data-active='true'] {
+  background: #f0fdfa;
+  box-shadow: inset 3px 0 0 #0f766e;
+}
+
+details[open] > summary {
+  list-style: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * `.stacked` is the narrow-screen behaviour of the record tables (companies, projects, search results). Below
+ * the breakpoint a horizontal table turns into one block per row and each cell prints its own column name from
+ * `data-label`, which `Td` already renders. Nothing is hidden on the way down — an archived company's row keeps
+ * every field it had, including the actions.
+ */
+@media (max-width: 40rem) {
+  .stacked thead {
+    display: none;
+  }
+
+  .stacked tr {
+    display: block;
+    border-bottom: 1px solid var(--color-slate-100);
+    padding: 0.35rem 0 0.6rem;
+  }
+
+  .stacked td {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    gap: 0.5rem;
+    border-bottom: 0;
+    padding: 0.15rem 0;
+    text-align: left !important;
+  }
+
+  .stacked td[data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-slate-500);
+  }
+
+  .stacked td[colspan] {
+    display: block;
+  }
+}
+
+/*
+ * The print view is a real document, so the app around it disappears: the shell, the navigation, the toolbar.
+ * Sections break on page boundaries rather than mid-card, and the muted screen greys are lifted to plain black
+ * because most printers lose them at 12px.
+ */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  html,
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  .print\:hidden,
+  nav[aria-label],
+  aside {
+    display: none !important;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Cards become plain blocks: the border and shadow are screen affordances, and a grey box around every
+     section wastes toner. Headings keep a size a printer resolves at 12px. */
+  [data-print-body] section {
+    break-inside: avoid;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 0 10pt !important;
+  }
+
+  [data-print-body] h2 {
+    font-size: 13pt;
+    margin-bottom: 4pt;
+  }
+
+  [data-print-body] {
+    max-width: none !important;
+  }
+
+  a {
+    color: #000;
+    text-decoration: none;
+  }
+}

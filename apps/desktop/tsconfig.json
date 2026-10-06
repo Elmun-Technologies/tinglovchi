@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": [],
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "noEmit": true
+  },
+  "include": ["src", "vite.config.ts"]
+}

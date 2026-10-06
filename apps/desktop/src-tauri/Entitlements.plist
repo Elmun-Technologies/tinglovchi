@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Local capture only: microphone access, no incoming network, no outgoing network entitlement. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <!-- Recordings are written under the app's own container (~/Library/Application Support/SUHBAT), so the
+       sandbox needs no additional user-directory access. ScreenCaptureKit does not require an
+       entitlement; it requires the user's Screen Recording grant, checked at runtime. -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <key>com.apple.security.files.user-selected.read-only</key>
+  <true/>
+</dict>
+</plist>

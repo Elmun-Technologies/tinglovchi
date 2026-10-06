@@ -1,0 +1,288 @@
+{
+  "schemaVersion": 1,
+  "tickFrequencyHz": "1000000000",
+  "notes": "Golden canonical-timeline vectors for docs/recording.md section 3. Expected values are integer (floored) nanosecond-tick arithmetic. packages/shared/src/timeline.ts (tests/unit/shared-timeline.test.ts) and apps/desktop/src-tauri/src/timeline.rs (cargo test on macOS) must both reproduce this file exactly. Ticks are decimal strings because they exceed JSON safe integers.",
+  "vectors": [
+    {
+      "name": "mic-startup-latency-and-30s-chunks",
+      "description": "48 kHz mono microphone stream whose first sample arrives 20 ms after t=0. The leading 20 ms stays an explicit gap, chunk boundaries are canonical multiples of 30000 ms, and playable duration (29980 ms) differs from the meeting interval [20,30000).",
+      "originTicks": "1000000000000",
+      "sampleRateHz": 48000,
+      "segments": [
+        {
+          "firstSampleIndex": 0,
+          "firstSampleTicks": "1000020000000",
+          "sampleCount": 2878080
+        }
+      ],
+      "targetChunkMs": 30000,
+      "expected": {
+        "meetingMsOfFirstSample": 20,
+        "chunks": [
+          {
+            "segmentIndex": 0,
+            "firstSampleIndex": 0,
+            "sampleCount": 1439040,
+            "meetingStartMs": 20,
+            "meetingEndMs": 30000,
+            "durationMs": 29980
+          },
+          {
+            "segmentIndex": 0,
+            "firstSampleIndex": 1439040,
+            "sampleCount": 1439040,
+            "meetingStartMs": 30000,
+            "meetingEndMs": 59980,
+            "durationMs": 29980
+          }
+        ],
+        "queriesSampleToTime": [
+          {
+            "sampleIndex": 0,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 0,
+              "meetingMs": 20
+            }
+          },
+          {
+            "sampleIndex": 1439039,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 0,
+              "meetingMs": 29999
+            }
+          },
+          {
+            "sampleIndex": 1439040,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 0,
+              "meetingMs": 30000
+            }
+          },
+          {
+            "sampleIndex": 2878079,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 0,
+              "meetingMs": 59979
+            }
+          }
+        ],
+        "canonicalDurationMsAtSegmentEnd": 59980
+      }
+    },
+    {
+      "name": "pause-resume-and-dropped-samples",
+      "description": "Two 30 s segments separated by a canonical pause gap [30000,90000) that is preserved rather than compressed; sample indices additionally jump by 60 000 at resume (device stall). No chunk may cross the pause or the stall, and seeking inside the gap returns the last real sample before it instead of invented audio.",
+      "originTicks": "5000000000000",
+      "sampleRateHz": 48000,
+      "segments": [
+        {
+          "firstSampleIndex": 0,
+          "firstSampleTicks": "5000000000000",
+          "sampleCount": 1440000
+        },
+        {
+          "firstSampleIndex": 1500000,
+          "firstSampleTicks": "5090000000000",
+          "sampleCount": 1440000
+        }
+      ],
+      "targetChunkMs": 30000,
+      "expected": {
+        "chunks": [
+          {
+            "segmentIndex": 0,
+            "firstSampleIndex": 0,
+            "sampleCount": 1440000,
+            "meetingStartMs": 0,
+            "meetingEndMs": 30000,
+            "durationMs": 30000
+          },
+          {
+            "segmentIndex": 1,
+            "firstSampleIndex": 1500000,
+            "sampleCount": 1440000,
+            "meetingStartMs": 90000,
+            "meetingEndMs": 120000,
+            "durationMs": 30000
+          }
+        ],
+        "queriesSampleToTime": [
+          {
+            "sampleIndex": 1439999,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 0,
+              "meetingMs": 29999
+            }
+          },
+          {
+            "sampleIndex": 1445000,
+            "expected": {
+              "kind": "gap",
+              "segmentIndexBefore": 0,
+              "segmentIndexAfter": 1
+            }
+          },
+          {
+            "sampleIndex": 1500000,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 1,
+              "meetingMs": 90000
+            }
+          },
+          {
+            "sampleIndex": 2939999,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 1,
+              "meetingMs": 119999
+            }
+          }
+        ],
+        "queriesTimeToSample": [
+          {
+            "meetingMs": 0,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 0,
+              "sampleIndex": 0
+            }
+          },
+          {
+            "meetingMs": 59999,
+            "expected": {
+              "kind": "gap",
+              "segmentIndexBefore": 0,
+              "sampleIndexBefore": 1439999
+            }
+          },
+          {
+            "meetingMs": 60000,
+            "expected": {
+              "kind": "gap",
+              "segmentIndexBefore": 0,
+              "sampleIndexBefore": 1439999
+            }
+          },
+          {
+            "meetingMs": 89999,
+            "expected": {
+              "kind": "gap",
+              "segmentIndexBefore": 0,
+              "sampleIndexBefore": 1439999
+            }
+          },
+          {
+            "meetingMs": 90000,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 1,
+              "sampleIndex": 1500000
+            }
+          },
+          {
+            "meetingMs": 119999,
+            "expected": {
+              "kind": "sample",
+              "segmentIndex": 1,
+              "sampleIndex": 2939952
+            }
+          },
+          {
+            "meetingMs": 120000,
+            "expected": {
+              "kind": "beyondEnd",
+              "sampleIndexAfter": 2940000
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "44100-rounding-partial-final-chunk",
+      "description": "44.1 kHz mono: exact 30 s boundary plus a partial final chunk; durationMs is frame-count arithmetic only.",
+      "originTicks": "900000000000",
+      "sampleRateHz": 44100,
+      "segments": [
+        {
+          "firstSampleIndex": 0,
+          "firstSampleTicks": "900000000000",
+          "sampleCount": 1400000
+        }
+      ],
+      "targetChunkMs": 30000,
+      "expected": {
+        "chunks": [
+          {
+            "segmentIndex": 0,
+            "firstSampleIndex": 0,
+            "sampleCount": 1323000,
+            "meetingStartMs": 0,
+            "meetingEndMs": 30000,
+            "durationMs": 30000
+          },
+          {
+            "segmentIndex": 0,
+            "firstSampleIndex": 1323000,
+            "sampleCount": 77000,
+            "meetingStartMs": 30000,
+            "meetingEndMs": 31746,
+            "durationMs": 1746
+          }
+        ]
+      }
+    },
+    {
+      "name": "thirty-minute-meeting-with-five-minute-pause",
+      "description": "Acceptance scenario: start 00:00, pause 10:00, resume 15:00, stop 30:00. Canonical duration 30:00 includes the silent gap; active capture duration is 25:00. The two must never be conflated.",
+      "originTicks": "10000000000000",
+      "tickFrequencyHz": "1000000000",
+      "activeIntervals": [
+        {
+          "startTicks": "10000000000000",
+          "endTicks": "10600000000000"
+        },
+        {
+          "startTicks": "10900000000000",
+          "endTicks": "11800000000000"
+        }
+      ],
+      "expected": {
+        "canonicalDurationMs": 1800000,
+        "activeCaptureMs": 1500000,
+        "pauseIntervals": [
+          {
+            "meetingStartMs": 600000,
+            "meetingEndMs": 900000,
+            "estimated": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "sleep-wake-epoch-bridge",
+      "description": "Restart after sleep: the monotonic clock did not advance while wall time did, so the gap is estimated from wall time, flagged estimated, and no sample-level audio is claimed inside it.",
+      "originTicks": "20000000000000",
+      "tickFrequencyHz": "1000000000",
+      "previousEpochId": "boot-1759787000",
+      "currentEpochId": "boot-1759787000",
+      "previousSegmentEndTicks": "23600000000000",
+      "nextSegmentStartTicks": "23600000000000",
+      "previousSegmentEndWallMs": 1759790600000,
+      "nextSegmentStartWallMs": 1759794200000,
+      "expected": {
+        "gap": {
+          "meetingStartMs": 3600000,
+          "meetingEndMs": 7200000,
+          "estimated": true,
+          "reason": "sleep_detected"
+        }
+      }
+    }
+  ]
+}
