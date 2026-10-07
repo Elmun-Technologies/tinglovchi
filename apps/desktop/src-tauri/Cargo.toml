@@ -20,10 +20,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 recorder-core = { workspace = true }
 
-# Platform isolation: the ScreenCaptureKit/AVFoundation bridge is a macOS-only dependency, so a Windows
-# or Linux build of the workspace still compiles (and fails closed at runtime) instead of half-working.
+# Platform isolation: the ScreenCaptureKit/AVFoundation bridge is a macOS-only dependency, and the
+# WASAPI bridge is a Windows-only dependency, so every target compiles only its own native bridge
+# (or fails closed at runtime on unsupported targets) instead of half-working.
 [target.'cfg(target_os = "macos")'.dependencies]
 capture-macos = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+capture-windows = { workspace = true }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

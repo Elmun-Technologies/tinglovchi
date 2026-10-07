@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/recorder-core", "crates/capture-macos"]
+members = ["src-tauri", "crates/recorder-core", "crates/capture-macos", "crates/capture-windows"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,7 @@ publish = false
 [workspace.dependencies]
 recorder-core = { path = "crates/recorder-core" }
 capture-macos = { path = "crates/capture-macos" }
+capture-windows = { path = "crates/capture-windows" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

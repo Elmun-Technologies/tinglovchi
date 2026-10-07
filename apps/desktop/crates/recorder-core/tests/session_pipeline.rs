@@ -767,13 +767,17 @@ fn a_crash_leaves_a_recoverable_session_that_startup_reconciliation_reports() {
             "the frozen checksum still matches byte-for-byte"
         );
     }
-    // The open interval was closed at the last durable tick, so duration reporting is honest.
+    // The open interval was closed at the last durable tick, so duration reporting is honest
+    // and never inflated beyond the 35_000 ms of audio actually fed into the session.
     let last_end = reconciled
         .active_intervals
         .last()
         .and_then(|interval| interval.meeting_end_ms)
         .expect("the open interval got an end");
-    assert!(last_end >= CHUNK_MS, "{last_end}");
+    assert!(
+        last_end >= CHUNK_MS && last_end <= 35_000,
+        "expected last_end in [30_000, 35_000], got {last_end}"
+    );
 }
 
 #[test]

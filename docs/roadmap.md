@@ -1,6 +1,18 @@
 # Roadmap and phase gates
 
-**Current worktree state:** The existing Phase 1 candidate is preserved on `arena/64675902-tinglovchi`; the authorized hardening pass is limited to its auth redirects, role policy/UI/tests, Phase 1 schema boundary, dependency/format hygiene, ignore rules, and aligned documentation. Phase 2 (local-first macOS recorder) is now implemented in `apps/desktop` and is **awaiting real-Mac validation**; no Phase 3 work has started.
+**Current worktree state:** Phases 0 through 10 and the Unified Durable Worker Runtime (`@suhbat/database/worker`) are implemented on `arena/111d1d7b-tinglovchi`:
+
+- **Phase 1:** Auth and workspace foundation (`supabase/migrations/202610060001_phase1_foundation.sql`).
+- **Phase 2:** Local-first macOS recorder (`apps/desktop/crates/recorder-core`, `apps/desktop/crates/capture-macos`, `docs/mac-recorder-acceptance.md`).
+- **Phase 3 (Product Experience v1):** Complete product experience, repositories, and typed demo/live data boundary (`packages/product`, `packages/ui`, `apps/web`).
+- **Phase 4 & 4.1:** Upload, storage & processing backbone and security hardening (`supabase/migrations/202610070001_phase4_upload_processing_backbone.sql`, `202610070002_phase4_1_security_hardening.sql`, `@suhbat/database/phase4`, `@suhbat/database/storage`).
+- **Phase 5:** Transcription & canonical alignment pipeline (`supabase/migrations/202610070003_phase5_transcription_alignment.sql`, `@suhbat/database/phase5`, `@suhbat/database/transcription-alignment`).
+- **Phase 6:** AI meeting intelligence pipeline & evidence validation (`supabase/migrations/202610070004_phase6_meeting_intelligence.sql`, `@suhbat/database/phase6`, `@suhbat/database/intelligence-pipeline`).
+- **Phase 7:** Company memory, knowledge indexing & Ask AI RAG (`supabase/migrations/202610070005_phase7_company_memory_ask_ai.sql`, `@suhbat/database/phase7`, `@suhbat/database/knowledge-pipeline`).
+- **Phase 8:** Telegram companion & notifications (`supabase/migrations/202610070006_phase8_telegram_companion_notifications.sql`, `@suhbat/database/phase8`).
+- **Phase 9:** Business automation & human-confirmed integrations (`supabase/migrations/202610070007_phase9_business_automation.sql`, `@suhbat/database/phase9`).
+- **Phase 10:** Local-first Windows WASAPI recorder (`apps/desktop/crates/capture-windows`, `docs/windows-recorder-acceptance.md`).
+- **Unified Durable Worker Runtime:** End-to-end job orchestration across Phases 4–9 and storage deletion ledger reconciliation (`@suhbat/database/worker`, `packages/database/src/worker-runtime.ts`).
 
 ## Phase 0 — Discovery and foundation (complete)
 

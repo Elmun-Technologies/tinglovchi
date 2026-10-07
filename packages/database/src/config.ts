@@ -5,14 +5,21 @@ export type SupabasePublicConfig = {
   anonKey: string;
 };
 
+export {
+  ProductionConfigError,
+  validateProductionEnvironment,
+  type ProductionEnvironmentRole,
+  type ProductionEnvironmentValidationResult,
+} from './production-env.ts';
+
 /**
  * Return the single trusted origin used for email links and auth callback redirects.
  * Never derive this value from an incoming request's Host or forwarded headers.
  */
-export function getCanonicalAppUrl(): URL {
-  const configuredUrl = process.env.APP_URL?.trim();
+export function getCanonicalAppUrl(env: Record<string, string | undefined> = process.env): URL {
+  const configuredUrl = env.APP_URL?.trim();
   if (!configuredUrl) {
-    if (process.env.NODE_ENV === 'development') return new URL(developmentAppUrl);
+    if (env.NODE_ENV === 'development') return new URL(developmentAppUrl);
     throw new Error('APP_URL must be explicitly configured outside development.');
   }
 
@@ -26,7 +33,7 @@ export function getCanonicalAppUrl(): URL {
   }
 
   const isLoopbackHttp =
-    process.env.NODE_ENV === 'development' &&
+    env.NODE_ENV === 'development' &&
     parsedUrl.protocol === 'http:' &&
     ['localhost', '127.0.0.1', '[::1]'].includes(parsedUrl.hostname);
   if (parsedUrl.protocol !== 'https:' && !isLoopbackHttp) {
@@ -49,9 +56,11 @@ export function assertCanonicalAppUrlConfiguration(): void {
   getCanonicalAppUrl();
 }
 
-export function getSupabasePublicConfig(): SupabasePublicConfig | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+export function getSupabasePublicConfig(
+  env: Record<string, string | undefined> = process.env,
+): SupabasePublicConfig | null {
+  const url = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
   if (!url || !anonKey) return null;
 
@@ -67,6 +76,8 @@ export function getSupabasePublicConfig(): SupabasePublicConfig | null {
   return { url, anonKey };
 }
 
-export function isSupabaseConfigured(): boolean {
-  return getSupabasePublicConfig() !== null;
+export function isSupabaseConfigured(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return getSupabasePublicConfig(env) !== null;
 }

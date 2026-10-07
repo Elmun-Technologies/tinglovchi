@@ -25,6 +25,7 @@
 
 #import "suhbat_capture.h"
 
+#import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreAudio/CoreAudio.h>
 #import <CoreAudio/CoreAudioTypes.h>
@@ -344,24 +345,48 @@ static void suhbat_deliver_sck(SuhbatStream *stream, CMSampleBufferRef sampleBuf
   }
   size_t dataLength = 0;
   char *data = NULL;
-  if (CMBlockBufferGetDataPointer(block, NULL, NULL, &dataLength, NULL, (void **)&data) != kCMBlockBufferNoErr ||
-      data == NULL) {
+  if (CMBlockBufferGetDataPointer(block, 0, NULL, &dataLength, &data) != kCMBlockBufferNoErr || data == NULL) {
     return;
   }
   UInt32 channelsPerFrame = asbd->mChannelsPerFrame > 0 ? asbd->mChannelsPerFrame : 2;
-  UInt32 bytesPerFrame = asbd->mFramesPerPacket * asbd->mBitsPerChannel / 8;
-  if (bytesPerFrame == 0) {
-    bytesPerFrame = channelsPerFrame * sizeof(float);
+  CMItemCount numSamples = CMSampleBufferGetNumSamples(sampleBuffer);
+  SInt32 frames = (SInt32)numSamples;
+  if (frames <= 0) {
+    UInt32 bytesPerSample = asbd->mBitsPerChannel > 0 ? (asbd->mBitsPerChannel / 8) : sizeof(float);
+    UInt32 totalBytesPerFrame = channelsPerFrame * bytesPerSample;
+    frames = totalBytesPerFrame > 0 ? (SInt32)(dataLength / totalBytesPerFrame) : 0;
   }
-  SInt32 frames = (SInt32)(dataLength / bytesPerFrame);
   if (frames <= 0) {
     return;
   }
   BOOL isFloat = asbd->mFormatID == kAudioFormatLinearPCM && (asbd->mFormatFlags & kAudioFormatFlagIsFloat) != 0;
   if (isFloat) {
+    size_t requiredBytes = (size_t)frames * (size_t)channelsPerFrame * sizeof(float);
+    if (dataLength < requiredBytes) {
+      suhbat_report_dropped(stream, (uint64_t)frames);
+      return;
+    }
     stream.channels = (uint16_t)channelsPerFrame;
     stream.sampleRate = (uint32_t)asbd->mSampleRate;
-    [stream submit:(const float *)data frames:frames channels:(SInt32)channelsPerFrame];
+    BOOL isNonInterleaved = (asbd->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 && channelsPerFrame > 1;
+    if (!isNonInterleaved) {
+      [stream submit:(const float *)data frames:frames channels:(SInt32)channelsPerFrame];
+      return;
+    }
+    float *interleaved = (float *)malloc(requiredBytes);
+    if (interleaved == NULL) {
+      suhbat_report_dropped(stream, (uint64_t)frames);
+      return;
+    }
+    const float *planes = (const float *)data;
+    for (SInt32 f = 0; f < frames; f++) {
+      for (UInt32 ch = 0; ch < channelsPerFrame; ch++) {
+        interleaved[(size_t)f * (size_t)channelsPerFrame + (size_t)ch] =
+            planes[(size_t)ch * (size_t)frames + (size_t)f];
+      }
+    }
+    [stream submit:interleaved frames:frames channels:(SInt32)channelsPerFrame];
+    free(interleaved);
     return;
   }
   /* A non-float format would need its own path; refusing it is better than guessing a layout and writing
@@ -369,7 +394,7 @@ static void suhbat_deliver_sck(SuhbatStream *stream, CMSampleBufferRef sampleBuf
   suhbat_report_dropped(stream, (uint64_t)frames);
 }
 
-@interface SuhbatSckDelegate : NSObject <SCStreamDelegate>
+@interface SuhbatSckDelegate : NSObject <SCStreamDelegate, SCStreamOutput>
 @property(nonatomic, weak) SuhbatStream *stream;
 @end
 
@@ -386,22 +411,20 @@ static void suhbat_deliver_sck(SuhbatStream *stream, CMSampleBufferRef sampleBuf
   SuhbatStream *target = self.stream;
   if (target != nil) {
     target.stopped = 1;
-    suhbat_emit_state(SUHBAT_STREAM_FAILED, error.localizedDescription.UTF8String);
+    [target emitState:SUHBAT_STREAM_FAILED detail:error.localizedDescription.UTF8String];
   }
 }
 @end
 
 /* One delegate per stream: keep it alive by hanging it on the stream object. */
-static void suhbat_attach_delegate(SCStream *stream, SuhbatStream *owner) {
+static BOOL suhbat_attach_delegate(SCStream *stream, SuhbatStream *owner, NSError **error) {
   SuhbatSckDelegate *delegate = [[SuhbatSckDelegate alloc] init];
   delegate.stream = owner;
-  NSError *addDelegateError = nil;
-  if (![stream addStreamDelegate:delegate type:SCStreamOutputTypeAudio
-                           queue:dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0)
-                           error:&addDelegateError]) {
-    NSLog(@"suhbat: adding the SCK audio delegate failed: %@", addDelegateError.localizedDescription);
-  }
   owner.delegate = delegate; /* the SCStream API holds delegates weakly */
+  return [stream addStreamOutput:delegate
+                            type:SCStreamOutputTypeAudio
+              sampleHandlerQueue:dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0)
+                           error:error];
 }
 #endif /* SUHBAT_HAVE_SCREEN_CAPTURE_KIT */
 
@@ -524,7 +547,8 @@ void suhbat_device_actual_format(suhbat_source_kind kind, const char *device_uid
     return;
   }
   (void)device_uid;
-  AVAudioFormat *format = [[AVAudioEngine engine].inputNode outputFormatForBus:0];
+  AVAudioEngine *engine = [[AVAudioEngine alloc] init];
+  AVAudioFormat *format = [engine.inputNode outputFormatForBus:0];
   if (format != nil && format.sampleRate > 0) {
     if (sample_rate != NULL) *sample_rate = (uint32_t)lrint(format.sampleRate);
     if (channels != NULL) *channels = (uint16_t)format.channelCount;
@@ -590,11 +614,13 @@ suhbat_stream *suhbat_stream_start(const suhbat_stream_config *config, char *err
     if (@available(macOS 14.0, *)) {
       configuration.excludesCurrentProcessAudio = YES;
     }
-    SCStream *sck = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:nil];
+    SuhbatSckDelegate *sckDelegate = [[SuhbatSckDelegate alloc] init];
+    sckDelegate.stream = stream;
+    stream.delegate = sckDelegate;
+    SCStream *sck = [[SCStream alloc] initWithFilter:filter configuration:configuration delegate:sckDelegate];
     stream.stream = sck;
-    suhbat_attach_delegate(sck, stream);
     NSError *addAudioError = nil;
-    if (![sck addStreamOutputType:SCStreamOutputTypeAudio error:&addAudioError]) {
+    if (!suhbat_attach_delegate(sck, stream, &addAudioError)) {
       suhbat_write_ns(addAudioError.localizedDescription ?: @"could not add the audio output", err, err_len);
       [stream teardown];
       return nil;
@@ -615,7 +641,7 @@ suhbat_stream *suhbat_stream_start(const suhbat_stream_config *config, char *err
       [stream teardown];
       return nil;
     }
-    stream.sampleRate = configuration.sampleRate;
+    stream.sampleRate = (uint32_t)configuration.sampleRate;
     stream.channels = (uint16_t)configuration.channelCount;
     [stream emitState:SUHBAT_STREAM_RUNNING detail:"system audio stream started"];
     return (suhbat_stream *)(__bridge_retained void *)stream;
@@ -642,7 +668,7 @@ int suhbat_stream_pause(suhbat_stream *handle, char *err, size_t err_len) {
   else if (stream.stream != nil) {
     __block NSError *blockError = nil;
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-    [stream.stream pauseCaptureWithCompletionHandler:^(NSError *_Nullable captureError) {
+    [stream.stream stopCaptureWithCompletionHandler:^(NSError *_Nullable captureError) {
       blockError = captureError;
       dispatch_semaphore_signal(semaphore);
     }];
@@ -654,7 +680,7 @@ int suhbat_stream_pause(suhbat_stream *handle, char *err, size_t err_len) {
     suhbat_write_ns(error.localizedDescription, err, err_len);
     return -2;
   }
-  [stream emitState:SUHBAT_STREAM_PAUSED detail:@"paused"];
+  [stream emitState:SUHBAT_STREAM_PAUSED detail:"paused"];
   return 0;
 }
 
@@ -690,7 +716,7 @@ int suhbat_stream_resume(suhbat_stream *handle, char *err, size_t err_len) {
   /* The first block after a resume must begin a new segment in the sample map. */
   stream.discontinuity = 1;
   stream.paused = 0;
-  [stream emitState:SUHBAT_STREAM_RUNNING detail:@"resumed"];
+  [stream emitState:SUHBAT_STREAM_RUNNING detail:"resumed"];
   return 0;
 }
 
@@ -700,7 +726,7 @@ void suhbat_stream_stop(suhbat_stream *handle) {
   }
   SuhbatStream *stream = (__bridge_transfer SuhbatStream *)(void *)handle;
   [stream teardown];
-  [stream emitState:SUHBAT_STREAM_ENDED detail:@"stopped"];
+  [stream emitState:SUHBAT_STREAM_ENDED detail:"stopped"];
 }
 
 const char *suhbat_settings_url(suhbat_source_kind kind) {

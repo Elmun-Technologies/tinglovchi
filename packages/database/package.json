@@ -15,9 +15,84 @@
     "./types": {
       "types": "./src/database.types.ts",
       "import": "./src/database.types.ts"
+    },
+    "./storage": {
+      "types": "./src/storage.ts",
+      "import": "./src/storage.ts"
+    },
+    "./phase4": {
+      "types": "./src/phase4-backbone.ts",
+      "import": "./src/phase4-backbone.ts"
+    },
+    "./transcription-alignment": {
+      "types": "./src/transcription-alignment.ts",
+      "import": "./src/transcription-alignment.ts"
+    },
+    "./transcription-provider": {
+      "types": "./src/transcription-provider.ts",
+      "import": "./src/transcription-provider.ts"
+    },
+    "./phase5": {
+      "types": "./src/phase5-transcription.ts",
+      "import": "./src/phase5-transcription.ts"
+    },
+    "./intelligence-provider": {
+      "types": "./src/intelligence-provider.ts",
+      "import": "./src/intelligence-provider.ts"
+    },
+    "./intelligence-pipeline": {
+      "types": "./src/intelligence-pipeline.ts",
+      "import": "./src/intelligence-pipeline.ts"
+    },
+    "./phase6": {
+      "types": "./src/phase6-intelligence.ts",
+      "import": "./src/phase6-intelligence.ts"
+    },
+    "./embedding-provider": {
+      "types": "./src/embedding-provider.ts",
+      "import": "./src/embedding-provider.ts"
+    },
+    "./knowledge-pipeline": {
+      "types": "./src/knowledge-pipeline.ts",
+      "import": "./src/knowledge-pipeline.ts"
+    },
+    "./phase7": {
+      "types": "./src/phase7-knowledge.ts",
+      "import": "./src/phase7-knowledge.ts"
+    },
+    "./telegram-provider": {
+      "types": "./src/telegram-provider.ts",
+      "import": "./src/telegram-provider.ts"
+    },
+    "./phase8": {
+      "types": "./src/phase8-telegram.ts",
+      "import": "./src/phase8-telegram.ts"
+    },
+    "./automation-provider": {
+      "types": "./src/automation-provider.ts",
+      "import": "./src/automation-provider.ts"
+    },
+    "./phase9": {
+      "types": "./src/phase9-automation.ts",
+      "import": "./src/phase9-automation.ts"
+    },
+    "./worker": {
+      "types": "./src/worker-runtime.ts",
+      "import": "./src/worker-runtime.ts"
+    },
+    "./observability": {
+      "types": "./src/observability.ts",
+      "import": "./src/observability.ts"
+    },
+    "./worker-cli": {
+      "types": "./src/worker-cli.ts",
+      "import": "./src/worker-cli.ts"
     }
   },
   "dependencies": {
+    "@suhbat/contracts": "0.1.0",
+    "@suhbat/product": "0.1.0",
+    "@suhbat/shared": "0.1.0",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.117.2",
     "server-only": "0.0.1"

@@ -301,6 +301,82 @@ export function estimatedGapRecord(input: {
   };
 }
 
+/**
+ * Playable duration in milliseconds for `sampleCount` frames at `sampleRateHz` using integer math.
+ */
+export function sourceSamplesToDurationMs(sampleCount: number, sampleRateHz: number): number {
+  assertNonNegativeInteger(sampleCount, 'sampleCount');
+  assertPositiveInteger(sampleRateHz, 'sampleRateHz');
+  return floorDiv(BigInt(sampleCount) * 1000n, BigInt(sampleRateHz));
+}
+
+/**
+ * Canonical meeting time in milliseconds for a sample offset from a source segment's first sample.
+ */
+export function meetingTimeMsFromSourceSamples(
+  firstSampleMeetingMs: number,
+  sampleOffsetFromFirst: number,
+  sampleRateHz: number,
+): number {
+  assertNonNegativeInteger(firstSampleMeetingMs, 'firstSampleMeetingMs');
+  assertNonNegativeInteger(sampleOffsetFromFirst, 'sampleOffsetFromFirst');
+  assertPositiveInteger(sampleRateHz, 'sampleRateHz');
+  return firstSampleMeetingMs + sourceSamplesToDurationMs(sampleOffsetFromFirst, sampleRateHz);
+}
+
+export type ChunkContinuityInput = {
+  readonly sequence: number;
+  readonly sampleRateHz: number;
+  readonly sampleStart: number;
+  readonly sampleEnd: number;
+  readonly meetingStartMs: number;
+  readonly meetingEndMs: number;
+};
+
+export type ChunkContinuityDiagnostic = {
+  readonly chunkIndex: number;
+  readonly kind: 'sequence_gap' | 'sample_gap' | 'meeting_time_gap';
+  readonly delta: number;
+};
+
+/**
+ * Validates sequence, sample-range, and meeting-time continuity across ordered chunks of a source.
+ */
+export function validateChunkContinuity(
+  chunks: readonly ChunkContinuityInput[],
+): ChunkContinuityDiagnostic[] {
+  const diagnostics: ChunkContinuityDiagnostic[] = [];
+  for (let i = 1; i < chunks.length; i += 1) {
+    const prev = chunks[i - 1]!;
+    const curr = chunks[i]!;
+    const seqDelta = curr.sequence - prev.sequence;
+    if (seqDelta !== 1) {
+      diagnostics.push({
+        chunkIndex: i,
+        kind: 'sequence_gap',
+        delta: seqDelta,
+      });
+    }
+    const sampleDelta = curr.sampleStart - prev.sampleEnd;
+    if (sampleDelta !== 0) {
+      diagnostics.push({
+        chunkIndex: i,
+        kind: 'sample_gap',
+        delta: sampleDelta,
+      });
+    }
+    const meetingDelta = curr.meetingStartMs - prev.meetingEndMs;
+    if (meetingDelta !== 0) {
+      diagnostics.push({
+        chunkIndex: i,
+        kind: 'meeting_time_gap',
+        delta: meetingDelta,
+      });
+    }
+  }
+  return diagnostics;
+}
+
 function floorDiv(numerator: bigint, denominator: bigint): number {
   return Number(fdiv(numerator, denominator));
 }
