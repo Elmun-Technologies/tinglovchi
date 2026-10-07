@@ -37,7 +37,9 @@ with no network at all: no database access, no Supabase dependency, no upload, n
 The product screens (dashboard, meetings, meeting tabs, transcript, topics, decisions, tasks, facts, questions,
 ideas, companies, projects, knowledge, Ask AI, search, settings) render through repository interfaces in
 `@suhbat/product`. No page imports a fixture, a database client or a provider: `apps/web/src/lib/repositories.ts`
-is the single point that selects an adapter, and the Supabase/API adapter is the seam that is still missing.
+is the single point that selects an adapter. In live mode the dashboard adapter reads through the signed-in
+user's Supabase session (PostgREST + RLS) from `apps/web/src/lib/supabase-live-repositories.ts`; the SQL adapter
+in `apps/web/src/lib/live-repositories.ts` serves the worker/API runtime, which needs a PostgreSQL executor.
 
 - `SUHBAT_DATA_MODE=demo` (the default) serves `@suhbat/product/demo` — versioned, cross-referenced fixtures
   (meetings with transcripts, speakers, topics, decisions, tasks, citations). The fixtures are checked for
