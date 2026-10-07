@@ -81,6 +81,9 @@ export const ui = {
     workspaceUnavailableBody:
       'This workspace does not exist in the current data source, or you are not a member of it. Workspace access is decided by membership, never by a URL.',
     signedOut: 'Sign in to open a workspace.',
+    notConfiguredTitle: 'Live data source is not configured',
+    notConfiguredBody:
+      'SUHBAT_DATA_MODE=live requires NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in this deployment. Until they are present no workspace data can be read.',
     notFoundTitle: 'Not found in this workspace',
     providerTitle: 'Data source is not reachable',
     retryNavigation: 'Reload',
@@ -269,7 +272,7 @@ export const ui = {
     unmappedCount: 'labels still unmapped',
     mappedNotice: 'Mapping updates the lines carrying this label in this meeting only.',
     unavailable:
-      'Speaker mapping needs the live adapter; in demo mode it updates in-memory state only.',
+      'Speaker mapping needs a write-capable data source. In demo mode it updates in-memory state; this deployment is read-only.',
   },
   companies: {
     title: 'Companies',

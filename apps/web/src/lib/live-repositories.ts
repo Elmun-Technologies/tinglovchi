@@ -81,6 +81,7 @@ import {
   createBusinessAutomationProviderFromEnv,
   type BusinessAutomationProvider,
 } from '@suhbat/database/automation-provider';
+import { unavailableNamespace } from './repository-unavailable';
 import type {
   FactCategory as ContractFactCategory,
   GetMeetingIntelligenceResponse,
@@ -127,10 +128,10 @@ function notImplemented(method: string): Promise<never> {
   return Promise.reject(
     new RepositoryError(
       'provider_unavailable',
-      'The live data adapter for this feature is not implemented yet.',
+      'This live repository operation has no SQL implementation in this build.',
       {
         detail: method,
-        hint: 'Phases 4–6 implement recording upload, verification, canonical transcription, speaker mapping, and AI meeting intelligence. Embeddings and Ask AI RAG are scheduled for Phase 7.',
+        hint: 'The web dashboard reads through the session-bound Supabase adapter; this SQL adapter serves the worker/API runtime.',
       },
     ),
   );
@@ -267,7 +268,9 @@ export function createLiveRepositories(
   context?: LiveRepositoryContext | null,
 ): ProductRepositories {
   if (!context) {
-    return createLivePlaceholderRepositories();
+    return createUnavailableSqlLiveRepositories(
+      'The SQL live repository adapter needs a PostgreSQL runtime context and an authenticated principal; none was provided.',
+    );
   }
 
   const { service, principal } = context;
@@ -2122,7 +2125,13 @@ export function createLiveRepositories(
   });
 }
 
-export function createLivePlaceholderRepositories(): ProductRepositories {
+/**
+ * The SQL/worker-side live adapter needs an explicit context (a PostgreSQL executor plus an authenticated
+ * principal). When a caller has none, this returns an adapter that states the configuration problem instead
+ * of a placeholder that claims the feature is "not implemented yet" — the failure mode that made a
+ * misconfigured deployment look like an empty product.
+ */
+export function createUnavailableSqlLiveRepositories(reason: string): ProductRepositories {
   const namespaces = new Map<string, object>();
   return new Proxy({ capabilities: liveCapabilities } as ProductRepositories, {
     get(target, property) {
@@ -2130,7 +2139,7 @@ export function createLivePlaceholderRepositories(): ProductRepositories {
       if (typeof property !== 'string') return undefined;
       const existing = namespaces.get(property);
       if (existing) return existing;
-      const created = namespace(property);
+      const created = unavailableNamespace(property, reason);
       namespaces.set(property, created);
       return created;
     },

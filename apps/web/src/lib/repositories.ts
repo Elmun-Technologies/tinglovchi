@@ -1,16 +1,29 @@
 import 'server-only';
-import { createSupabaseServerClient } from '@suhbat/database/server';
+import { cache as requestCache } from 'react';
 import { assertDemoIntegrity, createDemoRepositories, demoDataset } from '@suhbat/product/demo';
-import type { DataCapabilities, ProductRepositories } from '@suhbat/product';
+import { RepositoryError, type DataCapabilities, type ProductRepositories } from '@suhbat/product';
 import { createLiveRepositories, type LiveRepositoryContext } from './live-repositories';
+import {
+  createSupabaseLiveRepositories,
+  createUnavailableLiveRepositories,
+  type SupabaseLiveRepositoryContext,
+} from './supabase-live-repositories';
 import { resolveDataMode, type DataMode } from './data-mode';
+import { isSupabaseConfigured } from '@suhbat/database/config';
 
 /**
  * The single adapter-selection point for server components and server actions.
  *
  * Pages never import the demo fixtures, a database client, or an AI provider — they call
- * `getRepositories()` and read the typed contract. Swapping the demo adapter for Supabase later touches this
- * file and `live-repositories.ts` only.
+ * `getRepositories()` and read the typed contract.
+ *
+ * Adapter selection:
+ * - `demo` → versioned fixtures.
+ * - `live` + an explicitly registered context (tests, worker-side runtimes) → that context's adapter.
+ * - `live` + Supabase configured → the session-bound Supabase adapter, which reads through PostgREST with
+ *   the signed-in user's JWT so PostgreSQL RLS is the authorization boundary.
+ * - `live` + Supabase missing → an adapter that rejects with an explicit configuration error. It never
+ *   serves demo fixtures and never pretends the data is merely "not implemented yet".
  */
 
 export type WorkspaceAccess = {
@@ -27,7 +40,7 @@ export type WorkspaceAccess = {
 };
 
 export type AccessFailureReason =
-  'signed_out' | 'not_found' | 'no_membership' | 'provider_unavailable';
+  'signed_out' | 'not_found' | 'no_membership' | 'provider_unavailable' | 'not_configured';
 
 /**
  * Demo mutations live in one shared adapter instance so a dev server keeps a coherent story across requests
@@ -37,10 +50,12 @@ export type AccessFailureReason =
 const cache = globalThis as typeof globalThis & {
   __suhbatProductRepositories?: ProductRepositories;
   __suhbatDemoChecked?: boolean;
-  __suhbatLiveRepositoryContext?: LiveRepositoryContext | null;
+  __suhbatLiveRepositoryContext?: LiveRepositoryContext | SupabaseLiveRepositoryContext | null;
 };
 
-export function setLiveRepositoryContext(context: LiveRepositoryContext | null): void {
+export function setLiveRepositoryContext(
+  context: LiveRepositoryContext | SupabaseLiveRepositoryContext | null,
+): void {
   cache.__suhbatLiveRepositoryContext = context;
 }
 
@@ -58,10 +73,62 @@ export function dataMode(): DataMode {
   return resolveDataMode();
 }
 
+const missingLiveConfigurationMessage =
+  'SUHBAT_DATA_MODE=live requires NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY. Without them the dashboard cannot read workspace data through the signed-in Supabase session.';
+
+/**
+ * Reads the signed-in Supabase session for the current request and returns the live repository context.
+ *
+ * Memoized per request with React `cache()`: one session lookup and one adapter build no matter how many
+ * server components ask for repositories. The client is created by `@suhbat/database/server`, which is bound
+ * to the request cookies and to the public anon key only — never the service-role key, whose absence is what
+ * makes `RLS` the authorization boundary.
+ */
+const resolveSessionLiveContext = requestCache(async (): Promise<SupabaseLiveRepositoryContext> => {
+  const { createSupabaseServerClient } = await import('@suhbat/database/server');
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) {
+    throw new RepositoryError(
+      'unauthorized',
+      'Sign in to read this workspace. No authenticated Supabase session was found for this request.',
+    );
+  }
+  return {
+    client: supabase as unknown as SupabaseLiveRepositoryContext['client'],
+    userId: data.user.id,
+    email: data.user.email ?? null,
+  };
+});
+
+/**
+ * One session-bound live adapter per request.
+ *
+ * React's `cache()` scopes the value to the current server request, so two components that both ask for
+ * repositories share one adapter and one session lookup — and one signed-in user's adapter never becomes the
+ * next request's answer. Outside a request scope (tests, scripts) it simply rebuilds.
+ */
+const sessionLiveRepositories = requestCache((): ProductRepositories =>
+  createSupabaseLiveRepositories(resolveSessionLiveContext),
+);
+
 export function getRepositories(): ProductRepositories {
-  return dataMode() === 'demo'
-    ? demoRepositories()
-    : createLiveRepositories(cache.__suhbatLiveRepositoryContext ?? null);
+  if (dataMode() === 'demo') {
+    return demoRepositories();
+  }
+
+  const context = cache.__suhbatLiveRepositoryContext;
+  if (context) {
+    return 'client' in context
+      ? createSupabaseLiveRepositories(context)
+      : createLiveRepositories(context);
+  }
+
+  if (!isSupabaseConfigured()) {
+    return createUnavailableLiveRepositories(missingLiveConfigurationMessage);
+  }
+
+  return sessionLiveRepositories();
 }
 
 export function getCapabilities(): DataCapabilities {
@@ -92,7 +159,7 @@ export async function resolveAccess(workspaceId: string): Promise<Access> {
   }
 
   const liveCtx = cache.__suhbatLiveRepositoryContext;
-  if (liveCtx) {
+  if (liveCtx && 'service' in liveCtx) {
     if (!liveCtx.principal?.userId) return { ok: false, reason: 'signed_out' };
     try {
       const res = await liveCtx.service.db.query<{
@@ -136,32 +203,56 @@ export async function resolveAccess(workspaceId: string): Promise<Access> {
     }
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user) return { ok: false, reason: 'signed_out' };
-  const { data: membership, error: membershipError } = await supabase
+  // Session-bound path: the same Supabase client the live repositories use, so the RLS policies decide
+  // whether this workspace is visible to the signed-in user. No service-role access, no DB URL.
+  let client: SupabaseLiveRepositoryContext['client'];
+  let authenticatedUserId: string;
+  let email: string | null = null;
+
+  if (liveCtx && 'client' in liveCtx) {
+    client = liveCtx.client;
+    authenticatedUserId = liveCtx.userId;
+    email = liveCtx.email ?? null;
+  } else {
+    if (!isSupabaseConfigured()) return { ok: false, reason: 'not_configured' };
+    try {
+      const session = await resolveSessionLiveContext();
+      client = session.client;
+      authenticatedUserId = session.userId;
+      email = session.email ?? null;
+    } catch {
+      return { ok: false, reason: 'signed_out' };
+    }
+  }
+
+  const { data: membership, error: membershipError } = await client
     .from('workspace_members')
-    .select('role, workspace:workspaces(id, name, slug)')
-    .eq('user_id', authData.user.id)
+    .select('role')
+    .eq('user_id', authenticatedUserId)
     .eq('workspace_id', workspaceId)
     .eq('membership_status', 'active')
     .maybeSingle();
   if (membershipError) return { ok: false, reason: 'provider_unavailable' };
-  const workspace = (
-    membership as unknown as { workspace?: { id: string; name: string; slug: string } } | null
-  )?.workspace;
-  if (!membership || !workspace) return { ok: false, reason: 'no_membership' };
+  if (!membership) return { ok: false, reason: 'no_membership' };
+
+  const { data: workspace, error: workspaceError } = await client
+    .from('workspaces')
+    .select('id, name, slug')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (workspaceError) return { ok: false, reason: 'provider_unavailable' };
+  if (!workspace) return { ok: false, reason: 'not_found' };
+
   return {
     ok: true,
     access: {
       ok: true,
       workspaceId,
-      workspaceName: workspace.name,
-      workspaceSlug: workspace.slug,
-      role: membership.role as 'owner' | 'admin' | 'member',
-      // Mapping a Supabase user to a workspace person profile is part of the live adapter, not of this gate.
-      currentPersonId: null,
-      email: authData.user.email ?? null,
+      workspaceName: String(workspace['name'] ?? ''),
+      workspaceSlug: String(workspace['slug'] ?? ''),
+      role: (membership['role'] ?? 'member') as 'owner' | 'admin' | 'member',
+      currentPersonId: authenticatedUserId,
+      email,
       mode,
     },
   };
