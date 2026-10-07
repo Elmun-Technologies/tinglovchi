@@ -34,9 +34,18 @@ export const meetingProcessingStateSchema = z.enum([
   'recording',
   'queued',
   'uploading',
+  'preparing',
+  'ready_for_transcription',
   'preparing_transcript',
   'transcribing',
+  'normalizing_transcript',
+  'transcript_ready',
+  'transcription_failed',
+  'ready_for_analysis',
   'analyzing',
+  'normalizing_analysis',
+  'analysis_ready',
+  'analysis_failed',
   'indexing',
   'ready',
   'failed',
@@ -572,7 +581,7 @@ export type AiSettings = z.infer<typeof aiSettingsSchema>;
 export const integrationCardSchema = z.object({
   key: z.enum(['telegram', 'google_calendar', 'amocrm', 'google_docs']),
   label: z.string().min(1),
-  state: z.enum(['coming_later', 'not_connected']),
+  state: z.enum(['coming_later', 'not_connected', 'connected']),
   detail: z.string().min(1),
 });
 export type IntegrationCard = z.infer<typeof integrationCardSchema>;

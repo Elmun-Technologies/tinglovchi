@@ -26,9 +26,18 @@ export const meetingStateLabels: Record<MeetingProcessingState, string> = {
   recording: 'Recording',
   queued: 'Queued',
   uploading: 'Uploading',
+  preparing: 'Preparing',
+  ready_for_transcription: 'Ready for transcription',
   preparing_transcript: 'Preparing transcript',
   transcribing: 'Transcribing',
+  normalizing_transcript: 'Normalizing transcript',
+  transcript_ready: 'Transcript ready',
+  transcription_failed: 'Transcription failed',
+  ready_for_analysis: 'Ready for analysis',
   analyzing: 'Analyzing',
+  normalizing_analysis: 'Normalizing analysis',
+  analysis_ready: 'Analysis ready',
+  analysis_failed: 'Analysis failed',
   indexing: 'Indexing',
   ready: 'Ready',
   failed: 'Needs attention',
@@ -43,9 +52,26 @@ export const meetingStateNotes: Record<MeetingProcessingState, string> = {
   recording: 'The desktop recorder holds this session on the recording machine.',
   queued: 'Waiting for the next step in the pipeline.',
   uploading: 'Sending captured audio to the workspace store.',
+  preparing: 'Verifying uploaded recording chunks and preparing canonical audio assets.',
+  ready_for_transcription:
+    'Recording chunks are verified and prepared. Transcription has not started yet.',
   preparing_transcript: 'Aligning captured audio into one timeline per speaker.',
   transcribing: 'Converting speech into timestamped segments.',
+  normalizing_transcript:
+    'Aligning provider speech segments and speaker labels onto the canonical meeting timeline.',
+  transcript_ready:
+    'Canonical transcript and speaker segments are ready. AI meeting analysis has not run yet.',
+  transcription_failed:
+    'Transcription or canonical alignment reported a failure. Verified recording chunks are preserved.',
+  ready_for_analysis:
+    'Canonical transcript is finalized and queued for structured AI meeting intelligence.',
   analyzing: 'Extracting decisions, tasks, facts, questions and ideas.',
+  normalizing_analysis:
+    'Validating transcript evidence references and persisting structured meeting intelligence.',
+  analysis_ready:
+    'Structured meeting intelligence and evidence links are validated and ready to finalize.',
+  analysis_failed:
+    'AI meeting analysis or evidence validation reported a failure. Canonical transcript is preserved.',
   indexing: 'Making the content searchable across the workspace.',
   ready: 'Transcript, topics and analysis are available.',
   failed: 'A step reported a failure. The steps already completed are kept.',
@@ -55,12 +81,22 @@ export const meetingStateNotes: Record<MeetingProcessingState, string> = {
 export const processingStepLabels: Record<string, string> = {
   capture: 'Captured on device',
   upload: 'Uploaded',
+  verify: 'Chunks verified',
+  prepare_recording: 'Recording prepared',
+  ready_for_transcription: 'Ready for transcription',
   prepare: 'Transcript prepared',
   transcript: 'Transcript prepared',
   transcribe: 'Transcribed',
   transcribing: 'Transcribed',
+  normalize_transcript: 'Transcript aligned to canonical timeline',
+  transcript_ready: 'Transcript ready',
   diarize: 'Speakers separated',
+  ready_for_analysis: 'Ready for analysis',
   analyze: 'Analyzed',
+  analyze_meeting: 'Structured intelligence extracted',
+  normalize_intelligence: 'Intelligence evidence validated',
+  finalize_analysis: 'Meeting intelligence finalized',
+  analysis_ready: 'Analysis ready',
   index: 'Indexed',
 };
 

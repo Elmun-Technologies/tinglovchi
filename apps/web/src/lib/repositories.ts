@@ -2,7 +2,7 @@ import 'server-only';
 import { createSupabaseServerClient } from '@suhbat/database/server';
 import { assertDemoIntegrity, createDemoRepositories, demoDataset } from '@suhbat/product/demo';
 import type { DataCapabilities, ProductRepositories } from '@suhbat/product';
-import { createLivePlaceholderRepositories } from './live-repositories';
+import { createLiveRepositories, type LiveRepositoryContext } from './live-repositories';
 import { resolveDataMode, type DataMode } from './data-mode';
 
 /**
@@ -37,7 +37,12 @@ export type AccessFailureReason =
 const cache = globalThis as typeof globalThis & {
   __suhbatProductRepositories?: ProductRepositories;
   __suhbatDemoChecked?: boolean;
+  __suhbatLiveRepositoryContext?: LiveRepositoryContext | null;
 };
+
+export function setLiveRepositoryContext(context: LiveRepositoryContext | null): void {
+  cache.__suhbatLiveRepositoryContext = context;
+}
 
 function demoRepositories(): ProductRepositories {
   if (!cache.__suhbatDemoChecked) {
@@ -54,7 +59,9 @@ export function dataMode(): DataMode {
 }
 
 export function getRepositories(): ProductRepositories {
-  return dataMode() === 'demo' ? demoRepositories() : createLivePlaceholderRepositories();
+  return dataMode() === 'demo'
+    ? demoRepositories()
+    : createLiveRepositories(cache.__suhbatLiveRepositoryContext ?? null);
 }
 
 export function getCapabilities(): DataCapabilities {
@@ -82,6 +89,51 @@ export async function resolveAccess(workspaceId: string): Promise<Access> {
         mode,
       },
     };
+  }
+
+  const liveCtx = cache.__suhbatLiveRepositoryContext;
+  if (liveCtx) {
+    if (!liveCtx.principal?.userId) return { ok: false, reason: 'signed_out' };
+    try {
+      const res = await liveCtx.service.db.query<{
+        role: 'owner' | 'admin' | 'member';
+        workspace_id: string;
+        workspace_name: string;
+        workspace_slug: string;
+        email: string | null;
+      }>(
+        `select wm.role::text as role,
+                w.id as workspace_id,
+                w.name as workspace_name,
+                w.slug as workspace_slug,
+                p.email
+           from public.workspace_members wm
+           join public.workspaces w on w.id = wm.workspace_id
+           left join public.profiles p on p.id = wm.user_id
+          where wm.workspace_id = $1
+            and wm.user_id = $2
+            and wm.membership_status = 'active'
+            and w.deleted_at is null`,
+        [workspaceId, liveCtx.principal.userId],
+      );
+      const row = res.rows[0];
+      if (!row) return { ok: false, reason: 'no_membership' };
+      return {
+        ok: true,
+        access: {
+          ok: true,
+          workspaceId: row.workspace_id,
+          workspaceName: row.workspace_name,
+          workspaceSlug: row.workspace_slug,
+          role: row.role,
+          currentPersonId: liveCtx.principal.userId,
+          email: row.email,
+          mode,
+        },
+      };
+    } catch {
+      return { ok: false, reason: 'provider_unavailable' };
+    }
   }
 
   const supabase = await createSupabaseServerClient();

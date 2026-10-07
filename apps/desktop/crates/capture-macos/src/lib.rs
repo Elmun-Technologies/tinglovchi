@@ -472,20 +472,44 @@ mod bridge {
                 None | Some("") => None,
                 Some(uid) => Some(c_string(uid)?),
             };
+            let mut actual_sample_rate = 0u32;
+            let mut actual_channels = 0u16;
+            if config.kind == SourceKind::Microphone {
+                let uid_ptr = device_uid.as_ref().map_or(ptr::null(), |u| u.as_ptr());
+                // SAFETY: two writable scalars; `uid_ptr` is either null or NUL-terminated.
+                unsafe {
+                    suhbat_device_actual_format(
+                        ffi_int(config.kind),
+                        uid_ptr,
+                        &mut actual_sample_rate,
+                        &mut actual_channels,
+                    )
+                };
+            }
+            let realized_sample_rate = if actual_sample_rate > 0 {
+                actual_sample_rate
+            } else {
+                config.sample_rate_hz
+            };
+            let realized_channels = if actual_channels > 0 {
+                actual_channels
+            } else {
+                config.channels.max(1)
+            };
             let shared = SharedState::default();
             if let Ok(mut guard) = shared.state.lock() {
                 *guard = StreamState::Starting;
             }
             let context = Box::new(StreamContext {
                 callback,
-                channels: config.channels.max(1),
+                channels: realized_channels.max(1),
                 shared: shared.clone(),
             });
             let raw_context = Box::into_raw(context);
             let raw = RawStreamConfig {
                 kind: ffi_int(config.kind),
-                sample_rate_hz: config.sample_rate_hz,
-                channels: config.channels,
+                sample_rate_hz: realized_sample_rate,
+                channels: realized_channels,
                 device_uid: device_uid.as_ref().map_or_else(ptr::null, |value| value.as_ptr()),
                 user_data: raw_context as *mut c_void,
                 on_block: Some(on_block_trampoline),
@@ -517,20 +541,10 @@ mod bridge {
                 .with_source(config.kind)
                 .with_settings_hint(Self::settings_url(config.kind)));
             }
-            let mut sample_rate = 0u32;
-            let mut channels = 0u16;
-            if config.kind == SourceKind::Microphone {
-                if let Some(uid) = device_uid.as_ref() {
-                    // SAFETY: two writable scalars.
-                    unsafe { suhbat_device_actual_format(ffi_int(config.kind), uid.as_ptr(), &mut sample_rate, &mut channels) };
-                }
-            }
             // The manifest records the format actually delivered. No resampling happens in this phase, so a
             // device that only runs at 44.1 kHz must not be described as 48 kHz.
-            let actual = if sample_rate > 0 && channels > 0 {
-                Some((sample_rate, channels))
-            } else if config.kind == SourceKind::Microphone {
-                Some((config.sample_rate_hz, config.channels))
+            let actual = if realized_sample_rate > 0 && realized_channels > 0 {
+                Some((realized_sample_rate, realized_channels))
             } else {
                 None
             };

@@ -869,10 +869,20 @@ function IntegrationsSection({ settings }: SectionProps) {
               title={integration.label}
               description={integration.detail}
               actions={
-                <Badge tone={integration.state === 'not_connected' ? 'neutral' : 'outline'}>
-                  {integration.state === 'not_connected'
-                    ? ui.settings.integrations.notConnected
-                    : ui.settings.integrations.comingLater}
+                <Badge
+                  tone={
+                    integration.state === 'connected'
+                      ? 'success'
+                      : integration.state === 'not_connected'
+                        ? 'neutral'
+                        : 'outline'
+                  }
+                >
+                  {integration.state === 'connected'
+                    ? 'Connected'
+                    : integration.state === 'not_connected'
+                      ? ui.settings.integrations.notConnected
+                      : ui.settings.integrations.comingLater}
                 </Badge>
               }
             >

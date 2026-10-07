@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
 export * from './recorder';
+export * from './upload';
+export * from './transcription';
+export * from './intelligence';
+export * from './knowledge';
+export * from './telegram';
+export * from './automation';
 
 export const workspaceIdSchema = z.string().uuid();
 export const resourceIdSchema = z.string().uuid();

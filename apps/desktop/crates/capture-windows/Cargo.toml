@@ -1,0 +1,23 @@
+[package]
+name = "capture-windows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Windows capture bridge: WASAPI event-driven microphone + WASAPI loopback system audio, behind the recorder-core CaptureBackend trait. Non-Windows targets compile to a no-op stub."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+recorder-core = { workspace = true }
+
+# The C++ WASAPI bridge is only compiled for Windows; everywhere else `capture_windows` exposes the
+# same API with `available() == false`, so `recorder-core` keeps building (and its tests keep running)
+# on any host.
+[target.'cfg(target_os = "windows")'.build-dependencies]
+cc = "1"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

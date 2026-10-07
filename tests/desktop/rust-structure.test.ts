@@ -123,12 +123,13 @@ describe('recorder-core module graph', () => {
     expect(problems, problems.join('\n')).toEqual([]);
   });
 
-  it('recorder-core does not reach into the macOS crate', () => {
+  it('recorder-core does not reach into the macOS or Windows capture crates', () => {
     for (const name of MODULES) {
       // Comments are stripped: the crate documents *why* the alias lives in the app layer, and that prose
       // mention must not read as a dependency.
       const text = strip(readFileSync(join(CORE_SRC, `${name}.rs`), 'utf8'));
       expect(text.includes('capture_macos'), `${name}.rs depends on capture-macos`).toBe(false);
+      expect(text.includes('capture_windows'), `${name}.rs depends on capture-windows`).toBe(false);
     }
   });
 
@@ -136,8 +137,10 @@ describe('recorder-core module graph', () => {
     const files = [
       ...rustFilesIn(CORE_SRC),
       ...rustFilesIn(join(WORKSPACE, 'crates', 'capture-macos', 'src')),
+      ...rustFilesIn(join(WORKSPACE, 'crates', 'capture-windows', 'src')),
       ...rustFilesIn(join(WORKSPACE, 'src-tauri', 'src')),
       join(WORKSPACE, 'crates', 'capture-macos', 'build.rs'),
+      join(WORKSPACE, 'crates', 'capture-windows', 'build.rs'),
     ];
     for (const file of files) {
       const text = strip(readFileSync(file, 'utf8'));
@@ -159,6 +162,8 @@ describe('recorder-core module graph', () => {
   it('contains no placeholder implementations', () => {
     for (const file of [
       ...rustFilesIn(CORE_SRC),
+      ...rustFilesIn(join(WORKSPACE, 'crates', 'capture-macos', 'src')),
+      ...rustFilesIn(join(WORKSPACE, 'crates', 'capture-windows', 'src')),
       ...rustFilesIn(join(WORKSPACE, 'src-tauri', 'src')),
     ]) {
       const text = strip(readFileSync(file, 'utf8'));
@@ -170,11 +175,13 @@ describe('recorder-core module graph', () => {
   });
 
   it('gates every unsafe block with a SAFETY comment', () => {
-    const ffi = readFileSync(join(WORKSPACE, 'crates', 'capture-macos', 'src', 'lib.rs'), 'utf8');
-    const blocks = ffi.split('unsafe').length - 1;
-    const comments = (ffi.match(/SAFETY:/g) ?? []).length;
-    expect(blocks).toBeGreaterThan(0);
-    expect(comments).toBeGreaterThanOrEqual(Math.min(12, Math.ceil(blocks / 4)));
+    for (const crateName of ['capture-macos', 'capture-windows']) {
+      const ffi = readFileSync(join(WORKSPACE, 'crates', crateName, 'src', 'lib.rs'), 'utf8');
+      const blocks = ffi.split('unsafe').length - 1;
+      const comments = (ffi.match(/SAFETY:/g) ?? []).length;
+      expect(blocks).toBeGreaterThan(0);
+      expect(comments).toBeGreaterThanOrEqual(Math.min(12, Math.ceil(blocks / 4)));
+    }
   });
 
   it('keeps the Objective-C bridge free of obvious placeholder text', () => {
@@ -187,6 +194,18 @@ describe('recorder-core module graph', () => {
     expect(objc).toContain('CGPreflightScreenCaptureAccess');
     expect(objc).toContain('AVAuthorizationStatusAuthorized');
     expect(objc).toContain('excludesCurrentProcessAudio');
+    expect(objc).toContain('#import <AppKit/AppKit.h>');
+    expect(objc).toContain('<SCStreamDelegate, SCStreamOutput>');
+    expect(objc).toContain('addStreamOutput:delegate');
+    expect(objc).toContain('SCStreamOutputTypeAudio');
+    expect(objc).toContain('CMSampleBufferGetNumSamples');
+    expect(objc).toContain('CMBlockBufferGetDataPointer(block, 0, NULL, &dataLength, &data)');
+    expect(objc).toContain('kAudioFormatFlagIsNonInterleaved');
+    expect(objc).not.toContain('[AVAudioEngine engine]');
+    expect(objc).not.toContain('pauseCaptureWithCompletionHandler:');
+    expect(objc).not.toContain('detail:@"paused"');
+    expect(objc).not.toContain('detail:@"resumed"');
+    expect(objc).not.toContain('detail:@"stopped"');
     // Every capture entry point must exist for the Rust side to link against.
     for (const symbol of [
       'suhbat_backend_available',
@@ -195,6 +214,7 @@ describe('recorder-core module graph', () => {
       'suhbat_request_permission',
       'suhbat_device_count',
       'suhbat_device_at',
+      'suhbat_device_actual_format',
       'suhbat_stream_start',
       'suhbat_stream_pause',
       'suhbat_stream_resume',
@@ -204,24 +224,77 @@ describe('recorder-core module graph', () => {
     ]) {
       expect(objc.includes(symbol), `native bridge is missing ${symbol}`).toBe(true);
     }
-  });
 
-  it('declares every FFI symbol the Rust side imports', () => {
-    const header = readFileSync(
-      join(WORKSPACE, 'crates', 'capture-macos', 'native', 'suhbat_capture.h'),
+    const macRust = readFileSync(
+      join(WORKSPACE, 'crates', 'capture-macos', 'src', 'lib.rs'),
       'utf8',
     );
-    // The raw text, not the stripped one: stripping normalizes string literals, and `"C"` is the marker.
-    const raw = readFileSync(join(WORKSPACE, 'crates', 'capture-macos', 'src', 'lib.rs'), 'utf8');
-    const externBlock = /unsafe extern "C" \{([\s\S]*?)\n    \}/.exec(raw);
-    expect(externBlock, 'extern block not found').not.toBeNull();
-    const symbols = [...(externBlock?.[1] ?? '').matchAll(/fn\s+(\w+)/g)].map((match) => match[1]);
-    expect(symbols.length).toBeGreaterThan(8);
-    for (const symbol of symbols) {
-      expect(
-        header.includes(symbol),
-        `${symbol} is imported in Rust but absent from the C header`,
-      ).toBe(true);
+    expect(macRust).toContain('suhbat_device_actual_format');
+    const writerRust = readFileSync(join(CORE_SRC, 'writer.rs'), 'utf8');
+    expect(writerRust).toContain('chunk_first_sample_index');
+    expect(writerRust).toContain('chunk_first_tick');
+    expect(writerRust).toContain('chunk_sample_count');
+    expect(writerRust).not.toContain(
+      'let last_tick = self.tick_at(block.first_sample_index, block.first_tick, chunk.sample_count, frames);',
+    );
+  });
+
+  it('keeps the Windows C++ WASAPI bridge free of obvious placeholder text and implements all entry points', () => {
+    const cpp = readFileSync(
+      join(WORKSPACE, 'crates', 'capture-windows', 'native', 'suhbat_capture_win.cpp'),
+      'utf8',
+    );
+    expect(cpp).not.toMatch(/placeholder|TODO: implement|not implemented yet/i);
+    expect(cpp).toContain('QueryPerformanceCounter');
+    expect(cpp).toContain('QueryPerformanceFrequency');
+    expect(cpp).toContain('AUDCLNT_STREAMFLAGS_LOOPBACK');
+    expect(cpp).toContain('AUDCLNT_STREAMFLAGS_EVENTCALLBACK');
+    expect(cpp).toContain('IMMNotificationClient');
+    expect(cpp).toContain('AvSetMmThreadCharacteristicsW');
+    expect(cpp).toContain('ms-settings:privacy-microphone');
+    for (const symbol of [
+      'suhbat_win_backend_available',
+      'suhbat_win_system_audio_available',
+      'suhbat_win_os_version',
+      'suhbat_win_permission_state_for',
+      'suhbat_win_request_permission',
+      'suhbat_win_device_count',
+      'suhbat_win_device_at',
+      'suhbat_win_device_actual_format',
+      'suhbat_win_stream_start',
+      'suhbat_win_stream_pause',
+      'suhbat_win_stream_resume',
+      'suhbat_win_stream_stop',
+      'suhbat_win_settings_url',
+      'suhbat_win_open_settings',
+    ]) {
+      expect(cpp.includes(symbol), `Windows native bridge is missing ${symbol}`).toBe(true);
+    }
+  });
+
+  it('declares every FFI symbol the Rust side imports (macOS and Windows)', () => {
+    for (const [crateName, headerName] of [
+      ['capture-macos', 'suhbat_capture.h'],
+      ['capture-windows', 'suhbat_capture_win.h'],
+    ] as const) {
+      const header = readFileSync(
+        join(WORKSPACE, 'crates', crateName, 'native', headerName),
+        'utf8',
+      );
+      // The raw text, not the stripped one: stripping normalizes string literals, and `"C"` is the marker.
+      const raw = readFileSync(join(WORKSPACE, 'crates', crateName, 'src', 'lib.rs'), 'utf8');
+      const externBlock = /unsafe extern "C" \{([\s\S]*?)\n    \}/.exec(raw);
+      expect(externBlock, `extern block not found in ${crateName}`).not.toBeNull();
+      const symbols = [...(externBlock?.[1] ?? '').matchAll(/fn\s+(\w+)/g)].map(
+        (match) => match[1],
+      );
+      expect(symbols.length).toBeGreaterThan(8);
+      for (const symbol of symbols) {
+        expect(
+          header.includes(symbol),
+          `${symbol} is imported in ${crateName} Rust but absent from ${headerName}`,
+        ).toBe(true);
+      }
     }
   });
 

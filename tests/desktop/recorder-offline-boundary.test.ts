@@ -166,6 +166,26 @@ describe('recorder crates stay offline', () => {
     expect(buildScript).toContain('cfg(target_os = "macos")');
   });
 
+  it('keeps Windows-only code inside platform gates', () => {
+    const gate = /(cfg\(target_os\s*=\s*"windows"\)|#\[cfg\(target_os\s*=\s*"windows"\)\])/;
+    for (const file of rustFiles) {
+      const text = code(readFileSync(file, 'utf8'));
+      if (
+        /QueryPerformanceCounter|QueryPerformanceFrequency|suhbat_win_|capture_windows/.test(text)
+      ) {
+        expect(
+          gate.test(text),
+          `${relative(ROOT, file)} uses Windows APIs without a target_os gate`,
+        ).toBe(true);
+      }
+    }
+    const buildScript = readFileSync(
+      join(DESKTOP, 'crates', 'capture-windows', 'build.rs'),
+      'utf8',
+    );
+    expect(buildScript).toContain('cfg(target_os = "windows")');
+  });
+
   it('routes microphone and system audio to different logical sources', () => {
     const src = (...parts: string[]) =>
       readFileSync(join(DESKTOP, 'crates', 'recorder-core', 'src', ...parts), 'utf8');

@@ -66,9 +66,35 @@ fn monotonic_ns() -> u128 {
     u128::from(secs) * 1_000_000_000 + u128::from(nsecs)
 }
 
-/// Unsupported platforms (Windows in this phase) have no capture at all, so this fallback only needs
-/// to compile; it is process-relative and is never persisted as session audio time.
-#[cfg(not(unix))]
+#[cfg(target_os = "windows")]
+unsafe extern "system" {
+    fn QueryPerformanceCounter(lp_performance_count: *mut i64) -> i32;
+    fn QueryPerformanceFrequency(lp_frequency: *mut i64) -> i32;
+}
+
+/// On Windows, `SystemClock` reads `QueryPerformanceCounter` scaled to nanoseconds so the Rust
+/// coordinator and the WASAPI native bridge (`crates/capture-windows`) share the exact same
+/// hardware monotonic epoch.
+#[cfg(target_os = "windows")]
+fn monotonic_ns() -> u128 {
+    let mut counter: i64 = 0;
+    let mut frequency: i64 = 0;
+    // SAFETY: `counter` and `frequency` are valid stack-allocated `i64` pointers; both functions are
+    // infallible on Windows XP and later.
+    let ok_counter = unsafe { QueryPerformanceCounter(&mut counter) };
+    // SAFETY: see above.
+    let ok_freq = unsafe { QueryPerformanceFrequency(&mut frequency) };
+    if ok_counter == 0 || ok_freq == 0 || counter <= 0 || frequency <= 0 {
+        return 0;
+    }
+    let ticks = u128::try_from(counter).unwrap_or(0);
+    let freq = u128::try_from(frequency).unwrap_or(1);
+    (ticks * 1_000_000_000) / freq
+}
+
+/// Unsupported non-Unix/non-Windows targets fall back to a process-relative clock so `recorder-core`
+/// compiles everywhere.
+#[cfg(not(any(unix, target_os = "windows")))]
 fn monotonic_ns() -> u128 {
     u128::try_from(std::time::UNIX_EPOCH.elapsed().map(|since| since.as_nanos()).unwrap_or(0)).unwrap_or(0)
 }

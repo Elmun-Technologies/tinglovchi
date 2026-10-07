@@ -232,18 +232,26 @@ export function ProcessingState({
             {stateLabel ? (
               <Badge
                 tone={
-                  timeline.state === 'failed'
+                  timeline.state === 'failed' ||
+                  timeline.state === 'transcription_failed' ||
+                  timeline.state === 'analysis_failed'
                     ? 'danger'
-                    : timeline.state === 'ready'
+                    : timeline.state === 'ready' ||
+                        timeline.state === 'transcript_ready' ||
+                        timeline.state === 'analysis_ready'
                       ? 'success'
                       : 'info'
                 }
               >
                 <Dot
                   tone={
-                    timeline.state === 'failed'
+                    timeline.state === 'failed' ||
+                    timeline.state === 'transcription_failed' ||
+                    timeline.state === 'analysis_failed'
                       ? 'danger'
-                      : timeline.state === 'ready'
+                      : timeline.state === 'ready' ||
+                          timeline.state === 'transcript_ready' ||
+                          timeline.state === 'analysis_ready'
                         ? 'success'
                         : 'info'
                   }

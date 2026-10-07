@@ -148,6 +148,21 @@ type; `tauri::State<'_, Arc<AppState>>`; `app.path().app_data_dir()`; the `tauri
 Objective-C declarations in `suhbat_capture.m` (`SCStreamConfiguration.capturesAudio`,
 `excludesCurrentProcessAudio`, `CGPreflightScreenCaptureAccess`, `AVCaptureDevice.authorizationStatusForMediaType:`).
 
+### 3.4 Phase 12.1 Static Audit & Pre-Compile Fixes Applied
+
+During the Phase 12.1 Real Media & Recorder Acceptance audit, the following bugs were identified and fixed before physical macOS execution (all physical hardware acceptance gates G1–G7 and Tests A–I remain `PENDING` (`☐`) until run on physical macOS hardware):
+
+1. **`apps/desktop/crates/recorder-core/src/writer.rs` (`ChunkWriter::handle_block`)**:
+   - Fixed `WriterOutcome::Progress.last_tick` and `meeting_ms` calculation across multi-block chunks to compute `self.tick_at(chunk.first_sample_index, chunk.first_tick, chunk.sample_count, frames)` from the chunk anchor rather than adding `chunk.sample_count` to `block.first_tick`.
+2. **`apps/desktop/crates/capture-macos/native/suhbat_capture.m`**:
+   - Added `#import <AppKit/AppKit.h>` for `NSWorkspace`.
+   - Fixed 5-argument `CMBlockBufferGetDataPointer(block, 0, NULL, &dataLength, &data)` call, authoritative frame count extraction via `CMSampleBufferGetNumSamples(sampleBuffer)`, buffer bounds validation (`dataLength >= requiredBytes`), and planar-to-interleaved float32 conversion when `(asbd->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0`.
+   - Conformed `SuhbatSckDelegate` to `<SCStreamDelegate, SCStreamOutput>`, passed `sckDelegate` to `[[SCStream alloc] initWithFilter:configuration:delegate:]`, registered audio output via `[stream addStreamOutput:delegate type:SCStreamOutputTypeAudio sampleHandlerQueue:... error:...]`, and fixed `[target emitState:SUHBAT_STREAM_FAILED detail:...]`.
+   - Replaced non-existent `[AVAudioEngine engine]` with `[[AVAudioEngine alloc] init]` in `suhbat_device_actual_format`.
+   - Replaced non-existent `[self.sckStream pauseCaptureWithCompletionHandler:...]` with `[self.sckStream stopCaptureWithCompletionHandler:...]` and replaced Objective-C `@"paused"`, `@"resumed"`, `@"stopped"` literals with C strings `"paused"`, `"resumed"`, `"stopped"` in `emitState:detail:`.
+3. **`apps/desktop/crates/capture-macos/src/lib.rs`**:
+   - Queried `suhbat_device_actual_format` before constructing `StreamContext` (including when `device_uid` is `None`/default microphone) so `StreamContext.channels`, `RawStreamConfig`, and `MacosCaptureStream.actual` match the realized hardware sample rate and channel count.
+
 ---
 
 ## 4. Test A — Permissions

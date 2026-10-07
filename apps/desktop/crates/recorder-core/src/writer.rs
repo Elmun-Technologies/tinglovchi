@@ -280,8 +280,16 @@ impl ChunkWriter {
             return;
         }
         chunk.sample_count += frames;
+        let chunk_first_sample_index = chunk.first_sample_index;
+        let chunk_first_tick = chunk.first_tick;
+        let chunk_sample_count = chunk.sample_count;
         self.last_sample_index_exclusive = block.first_sample_index + frames;
-        let last_tick = self.tick_at(block.first_sample_index, block.first_tick, chunk.sample_count, frames);
+        let last_tick = self.tick_at(
+            chunk_first_sample_index,
+            chunk_first_tick,
+            chunk_sample_count,
+            frames,
+        );
         let level = measure_i16(&block.samples);
         let _ = self.outcomes.send(WriterOutcome::Progress {
             kind: self.spec.kind,
