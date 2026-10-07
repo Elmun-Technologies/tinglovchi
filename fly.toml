@@ -1,0 +1,26 @@
+app = "tinglovchi-staging-web"
+primary_region = "fra"
+
+[build]
+
+[build.args]
+  NEXT_PUBLIC_SUPABASE_URL = "https://ivppuyliugowykslvatf.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY = "sb_publishable_hPGKot9gNVws6y8Yg23-_w_9Fk8BiIt"
+  NEXT_PUBLIC_APP_NAME = "SUHBAT AI"
+
+[env]
+  APP_URL = "https://tinglovchi-staging-web.fly.dev"
+  SUHBAT_DATA_MODE = "live"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
