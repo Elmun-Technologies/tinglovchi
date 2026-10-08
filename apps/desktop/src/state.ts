@@ -20,6 +20,7 @@ import type {
   SourceLevel,
   SourceStatus,
 } from '@suhbat/contracts';
+import { copy } from './copy.ts';
 
 export const MAX_RECENT_CHUNKS = 12;
 
@@ -71,15 +72,13 @@ export function reduce(state: UiState, action: Action): UiState {
           ...state,
           bridgeKind: action.kind,
           notice: {
-            tone: 'warn',
-            title: 'Native recorder bridge unavailable',
-            detail:
-              'This renderer is not running inside the Tauri shell, so no microphone or system-audio command can reach the recorder and nothing is being captured. Start the app with `npm run tauri:dev` from apps/desktop on a Mac; opening this folder in a browser can only ever show this message.',
+            tone: 'info',
+            title: copy.errors.recorderUnavailable,
           },
         };
       }
       // Restoring the bridge clears only its own notice; a real error notice stays until the fault clears.
-      return state.notice?.title === 'Native recorder bridge unavailable'
+      return state.notice?.title === copy.errors.recorderUnavailable
         ? { ...state, bridgeKind: action.kind, notice: null }
         : { ...state, bridgeKind: action.kind };
     case 'status':
@@ -175,24 +174,20 @@ const PERSISTENCE_CODES = new Set([
 function clearIfResolved(notice: Notice | null, status: RecorderStatus): Notice | null {
   if (!notice || notice.tone === 'info') return notice;
   // A persistence notice is dismissed only by evidence, i.e. a status that no longer reports a fault.
-  if (status.persistenceFault === null && notice.title.startsWith('Persistence failed'))
+  if (status.persistenceFault === null && notice.title === copy.errors.persistenceFailed)
     return null;
   return notice;
 }
 
 export function noticeFromError(error: RecorderError): Notice {
-  const detail = [
-    error.message,
-    error.sourceKind ? `source: ${error.sourceKind}` : null,
-    error.retryable ? 'retryable' : null,
-    error.openSettingsUrl ? 'System Settings shortcut available' : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const title = PERSISTENCE_CODES.has(error.code)
-    ? `Persistence failed: ${error.code}`
-    : `${error.code} — see the details below`;
-  return { tone: 'error', title, detail };
+  const persistenceFailure = PERSISTENCE_CODES.has(error.code);
+  return {
+    tone: 'error',
+    title: persistenceFailure ? copy.errors.persistenceFailed : copy.errors.generic,
+    detail: persistenceFailure
+      ? 'Diskda bo‘sh joy borligini tekshiring. Muammo davom etsa, yordam xizmatiga murojaat qiling.'
+      : 'Qayta urinib ko‘ring. Muammo davom etsa, yordam xizmatiga murojaat qiling.',
+  };
 }
 
 /** The visible health of a source: never worse than the truth, never better than the record. */
@@ -282,13 +277,13 @@ export function controlsFor(state: UiState): Controls {
   const faulted = status?.persistenceFault != null;
   const blockedReason =
     state.bridgeKind === 'unavailable'
-      ? 'The native bridge is not available.'
+      ? copy.errors.recorderUnavailable
       : faulted
-        ? 'Persistence failed: stop this session and start a new one. Audio captured before the fault stays recoverable.'
+        ? copy.errors.persistenceFailed
         : recorderState === 'permission_blocked'
-          ? 'Grant microphone and screen-capture permission in System Settings, then re-check.'
+          ? copy.errors.microphoneDeniedDetail
           : recorderState === 'device_unavailable'
-            ? 'No usable input device is selected.'
+            ? copy.errors.deviceLost
             : null;
   return {
     // The Rust state machine only allows `ready -> recording`, so the button is enabled exactly then.

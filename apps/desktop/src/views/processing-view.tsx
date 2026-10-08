@@ -1,87 +1,36 @@
 import { copy } from '../copy.ts';
 import { processingHeadline } from '../flow.ts';
 
-/**
- * After Stop: saving → uploading → transcribing → analysing.
- *
- * No percentages anywhere. The backend cannot tell us how far through a transcription it is, so a
- * number would be invented. What it *can* tell us is which canonical step it is on, and that is
- * exactly what is rendered — sourced from `MeetingProcessingResponse.timeline.steps`, which the
- * pipeline builds from real recording/chunk/job rows.
- */
+/** One quiet status line, advanced only by the actual local and backend recording states. */
 export function ProcessingView({
   phase,
   productState,
-  steps,
-  progress,
-  offline,
-  onOpenResult,
 }: {
   phase: 'stopping' | 'uploading' | 'saved_locally' | 'processing';
   productState: string | null;
-  steps: { key: string; label: string; state: 'done' | 'active' | 'pending' | 'failed' }[];
-  progress: { verified: number; total: number } | null;
-  offline: boolean;
-  onOpenResult: () => void;
 }) {
-  const headline = processingHeadline(productState ?? 'preparing', copy.after);
-
   const title =
-    phase === 'stopping'
+    phase === 'stopping' || phase === 'saved_locally'
       ? copy.after.saving
-      : phase === 'saved_locally' || (phase === 'uploading' && offline)
-        ? copy.after.savedLocally
-        : phase === 'uploading'
-          ? headline.title === copy.after.uploading
-            ? copy.after.uploading
-            : copy.after.uploading
-          : headline.title;
-
-  const detail =
-    phase === 'saved_locally' || (phase === 'uploading' && offline)
-      ? copy.after.offlineSaved
-      : phase === 'uploading' && progress && progress.total > 0
-        ? `${copy.after.uploadResume} · ${progress.verified}/${progress.total}`
-        : phase === 'uploading'
-          ? copy.after.uploadResume
-          : null;
+      : phase === 'uploading'
+        ? copy.after.uploading
+        : processingHeadline(productState ?? 'preparing', copy.after).title;
 
   return (
     <section className="stage stage-processing">
-      <header className="stage-brand stage-brand-quiet">
-        <span className="rec-badge is-working">
-          <span className="rec-dot" />
-          {copy.tagline}
-        </span>
+      <header className="stage-brand">
+        <span className="wordmark">{copy.brand}</span>
       </header>
 
-      <div className="stage-centre">
+      <div className="stage-centre processing-centre" role="status" aria-live="polite">
         <div className="spinner" aria-hidden="true" />
         <h2 className="processing-title">{title}</h2>
-        {detail ? <p className="processing-detail">{detail}</p> : null}
-
-        {steps.length > 0 ? (
-          <ol className="step-list">
-            {steps.map((step) => (
-              <li key={step.key} data-state={step.state}>
-                <span className="step-marker" aria-hidden="true" />
-                <span className="step-label">{step.label}</span>
-              </li>
-            ))}
-          </ol>
-        ) : null}
       </div>
-
-      <footer className="stage-footer">
-        <button type="button" className="ghost-button" onClick={onOpenResult}>
-          {copy.after.viewResult}
-        </button>
-      </footer>
     </section>
   );
 }
 
-/** Shown when the meeting is saved but transcription or analysis stopped without succeeding. */
+/** A calm recovery state when the backend reports a real analysis failure. */
 export function AnalysisFailedView({
   notice,
   onOpenResult,
@@ -93,6 +42,9 @@ export function AnalysisFailedView({
 }) {
   return (
     <section className="stage stage-processing">
+      <header className="stage-brand">
+        <span className="wordmark">{copy.brand}</span>
+      </header>
       <div className="stage-centre">
         <span className="big-glyph" aria-hidden="true">
           ✓

@@ -1,22 +1,15 @@
-import type { RecorderStatus, SourceLevel } from '@suhbat/contracts';
+import type { RecorderStatus } from '@suhbat/contracts';
 import { SourcePill, Waveform } from '../components/waveform.tsx';
 import { copy } from '../copy.ts';
-import { formatClock, meterPercent } from '../state.ts';
+import { formatClock } from '../state.ts';
 
-/**
- * Recording and paused: the only screen a user should have to look at for an hour.
- *
- * The timer is never computed in JavaScript — `canonicalElapsedMs` comes from the recorder's monotonic
- * meeting clock, which already accounts for pauses and gaps (docs/recording.md §3). Both sources are
- * shown separately because microphone-only capture is a legitimate, non-broken outcome.
- */
+/** Focused recorder controls and live capture feedback; no session or operator details. */
 export function RecordingView({
   status,
   paused,
   canPause,
   canResume,
   canStop,
-  stopping,
   onPause,
   onResume,
   onStop,
@@ -26,7 +19,6 @@ export function RecordingView({
   canPause: boolean;
   canResume: boolean;
   canStop: boolean;
-  stopping: boolean;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
@@ -35,40 +27,39 @@ export function RecordingView({
   const mic = status?.sources.find((source) => source.kind === 'microphone') ?? null;
   const system = status?.sources.find((source) => source.kind === 'system_audio') ?? null;
   const micLevel = status?.levels.find((level) => level.kind === 'microphone') ?? null;
-  const systemLevel = status?.levels.find((level) => level.kind === 'system_audio') ?? null;
 
   return (
     <section className={`stage stage-recording ${paused ? 'is-paused' : ''}`}>
-      <header className="stage-brand stage-brand-quiet">
-        <span className="rec-badge" data-paused={paused}>
-          <span className="rec-dot" />
-          {paused ? copy.paused.title : copy.recording.title}
-        </span>
+      <header className="stage-brand">
+        <span className="wordmark">{copy.brand}</span>
       </header>
 
-      <div className="stage-centre">
+      <div className="stage-centre recording-centre">
+        <div className="recording-status" data-paused={paused}>
+          <span className="recording-dot" aria-hidden="true" />
+          <span>{paused ? copy.paused.title : copy.recording.title}</span>
+        </div>
+
         <div className="timer" role="timer" aria-live="off">
           {formatClock(elapsed)}
         </div>
-        {paused ? <p className="timer-hint">{copy.paused.hint}</p> : null}
 
-        <Waveform level={micLevel} tone={paused ? 'idle' : 'recording'} />
+        <Waveform level={micLevel} bars={24} tone={paused ? 'idle' : 'recording'} />
 
-        <div className="source-pills">
-          <SourcePill
-            label={copy.recording.mic}
-            state={sourceState(mic?.state, micLevel)}
-          />
-          <SourcePill
-            label={copy.recording.system}
-            state={sourceState(system?.state, systemLevel)}
-          />
+        <div className="source-pills" aria-label="Audio manbalari">
+          <SourcePill label={copy.recording.mic} state={sourceState(mic?.state)} />
+          <SourcePill label={copy.recording.system} state={sourceState(system?.state)} />
         </div>
       </div>
 
       <footer className="stage-footer stage-footer-controls">
         {paused ? (
-          <button type="button" className="pill-button primary" onClick={onResume} disabled={!canResume}>
+          <button
+            type="button"
+            className="pill-button primary"
+            onClick={onResume}
+            disabled={!canResume}
+          >
             {copy.recording.resume}
           </button>
         ) : (
@@ -76,28 +67,18 @@ export function RecordingView({
             {copy.recording.pause}
           </button>
         )}
-        <button type="button" className="pill-button stop" onClick={onStop} disabled={!canStop || stopping}>
-          {stopping ? copy.recording.stopping : copy.recording.stop}
+        <button type="button" className="pill-button stop" onClick={onStop} disabled={!canStop}>
+          {copy.recording.stop}
         </button>
       </footer>
-
-      <div className="meters" aria-hidden="true">
-        <div className="meter">
-          <div className="meter-fill" style={{ width: `${meterPercent(micLevel)}%` }} />
-        </div>
-        <div className="meter">
-          <div className="meter-fill" style={{ width: `${meterPercent(systemLevel)}%` }} />
-        </div>
-      </div>
     </section>
   );
 }
 
 function sourceState(
   state: 'starting' | 'active' | 'degraded' | 'unavailable' | undefined,
-  level: SourceLevel | null,
 ): 'active' | 'silent' | 'unavailable' {
+  if (state === 'active') return 'active';
   if (!state || state === 'unavailable') return 'unavailable';
-  if (!level?.live) return 'silent';
-  return 'active';
+  return 'silent';
 }

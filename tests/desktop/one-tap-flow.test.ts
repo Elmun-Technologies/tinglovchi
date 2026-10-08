@@ -360,6 +360,13 @@ describe('guards', () => {
 });
 
 describe('processing headlines', () => {
+  it('uses the recorder’s four calm processing labels for canonical backend states', () => {
+    expect(processingHeadline('recording', copy.after).title).toBe('Audio saqlanmoqda…');
+    expect(processingHeadline('uploading', copy.after).title).toBe('Yuklanmoqda…');
+    expect(processingHeadline('transcribing', copy.after).title).toBe('Transkripsiya qilinmoqda…');
+    expect(processingHeadline('analyzing', copy.after).title).toBe('Tahlil qilinmoqda…');
+  });
+
   it('maps every canonical product state onto one of four honest sentences', () => {
     const sentences = [
       'recording',
