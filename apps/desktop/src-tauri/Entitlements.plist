@@ -2,8 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Local capture only: microphone access, no incoming network, no outgoing network entitlement. -->
+  <!-- Microphone access for local capture. -->
   <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <!--
+    Outbound HTTPS only, and only because the one-tap flow has to reach the SUHBAT API.
+    This is an *outgoing client* grant, not a listening server: the app opens no port, runs no local
+    server, and never accepts a connection. Three limits keep it narrow:
+      * the renderer's only network module (apps/desktop/src/cloud.ts) builds every URL from the
+        VITE_SUHBAT_API_BASE_URL build variable or from a short-lived signed URL the server issued;
+      * the Content Security Policy in tauri.conf.json does not relax script-src or style-src, so a
+        remote response can never become code in this webview;
+      * there is still no incoming-network entitlement and no file access beyond the app container.
+    Capture itself stays local-first: an unreachable server never blocks recording.
+  -->
+  <key>com.apple.security.network.client</key>
   <true/>
   <!-- Recordings are written under the app's own container (~/Library/Application Support/SUHBAT), so the
        sandbox needs no additional user-directory access. ScreenCaptureKit does not require an

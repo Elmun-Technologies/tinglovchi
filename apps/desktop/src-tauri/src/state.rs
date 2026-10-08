@@ -148,6 +148,27 @@ fn emit_payload(app: &tauri::AppHandle, payload: serde_json::Value) {
     let _ = app.emit(EVENT_NAME, &payload);
 }
 
+/// True while audio is still being captured or the session is mid-finalize.
+///
+/// Read from the close-request handler so an accidental window close can never drop a recording: the
+/// close is prevented and the renderer is asked to show the "stop and save" confirmation instead.
+#[must_use]
+pub fn is_capturing(state: &AppState) -> bool {
+    let guard = crate::error::lock(&state.recorder);
+    matches!(
+        guard.recorder.state(),
+        recorder_core::session::RecorderState::Recording
+            | recorder_core::session::RecorderState::Paused
+            | recorder_core::session::RecorderState::Finalizing
+    )
+}
+
+/// Asks the renderer to confirm quitting. Emitted only when capture is live, and only ever alongside a
+/// prevented close — the app never quits behind the user's back while a meeting is being recorded.
+pub fn emit_close_requested(app: &tauri::AppHandle) {
+    emit_payload(app, serde_json::json!({ "type": "close_requested" }));
+}
+
 /// Read-only view of the manifest for the renderer, straight from the coordinator's memory (which the
 /// coordinator keeps in sync with the durable file after every revision).
 pub fn current_manifest(state: &AppState) -> Option<RecorderManifest> {

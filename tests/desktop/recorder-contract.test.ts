@@ -365,10 +365,6 @@ describe('Rust recorder and the shared contracts agree field by field', () => {
 
   it('the event union covers every RecorderEvent variant', () => {
     const { variants } = rustEnum('session.rs', 'RecorderEvent');
-    const tags = recorderEventSchema.options.map(
-      (option) => Object.keys(shapeOf(option)).length && option,
-    );
-    expect(tags.length).toBe(variants.length);
     const rustTags = variants
       .map((variant) => variant.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase())
       .sort();
@@ -383,6 +379,30 @@ describe('Rust recorder and the shared contracts agree field by field', () => {
         'fault',
       ].sort(),
     );
+  });
+
+  it('the event union carries every recorder event plus the one the desktop shell emits', () => {
+    //
+    // `RecorderEvent` is recorder-core's own vocabulary. The Tauri shell adds exactly one more —
+    // `close_requested`, raised by `emit_close_requested` when the user hits the window close button
+    // during capture — so the renderer can ask before the OS takes the session away. It has no Rust
+    // enum variant to compare against, which is why it is asserted here rather than above.
+    const { variants } = rustEnum('session.rs', 'RecorderEvent');
+    const tags = recorderEventSchema.options
+      .map((option) => {
+        const literal = shapeOf(option).type as { _def?: { values?: unknown[]; value?: unknown } };
+        return literal?._def?.values?.[0] ?? literal?._def?.value;
+      })
+      .filter((tag): tag is string => typeof tag === 'string')
+      .sort();
+    const rustTags = variants
+      .map((variant) => variant.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase())
+      .sort();
+    expect(tags).toEqual([...rustTags, 'close_requested'].sort());
+
+    const shell = readFileSync(join(ROOT, 'apps/desktop/src-tauri/src/state.rs'), 'utf8');
+    expect(shell).toMatch(/fn emit_close_requested/);
+    expect(shell).toMatch(/"closeRequested"|close_requested/);
   });
 
   it('recovery report fields match, including the added recoverable verdict', () => {

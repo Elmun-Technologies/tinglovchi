@@ -48,6 +48,12 @@ export const COMMANDS = {
   markImportant: 'recorder_mark_important',
   addNote: 'recorder_add_note',
   scanSessions: 'recorder_scan_sessions',
+  linkMeeting: 'recorder_link_meeting',
+  readChunkBytes: 'recorder_read_chunk_bytes',
+  readSessionChunk: 'recorder_read_session_chunk',
+  prepareRecoveredUpload: 'recorder_prepare_recovered_upload',
+  openExternal: 'recorder_open_external',
+  finishClose: 'recorder_finish_close',
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -118,6 +124,31 @@ function tryJson(text: string): unknown {
   }
 }
 
+const BASE64_ALPHABET =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function decodeBase64(encoded: string): Uint8Array {
+  const text = encoded.replace(/[\s=]/g, '');
+  const bytes = new Uint8Array(Math.floor((text.length * 3) / 4));
+  let bitBuffer = 0;
+  let bitCount = 0;
+  let cursor = 0;
+  for (const character of text) {
+    const value = BASE64_ALPHABET.indexOf(character);
+    if (value < 0) {
+      throw new ContractViolationError('chunk bytes', encoded, new Error('invalid base64 character'));
+    }
+    bitBuffer = (bitBuffer << 6) | value;
+    bitCount += 6;
+    if (bitCount >= 8) {
+      bitCount -= 8;
+      bytes[cursor] = (bitBuffer >> bitCount) & 0xff;
+      cursor += 1;
+    }
+  }
+  return bytes.subarray(0, cursor);
+}
+
 function validate<T>(schema: z.ZodType<T>, what: string, value: unknown): T {
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
@@ -155,6 +186,31 @@ export interface RecorderBridge {
   markImportant(label: string | null): Promise<unknown>;
   addNote(text: string): Promise<unknown>;
   scanSessions(): Promise<RecoveryReport>;
+  /**
+   * Attaches the running (or already stopped) session to a server-side meeting. Recording starts
+   * unlinked on purpose, so the desktop can create the meeting once it can reach the server.
+   */
+  linkMeeting(workspaceId: string | null, meetingId: string | null): Promise<RecorderStatus>;
+  /**
+   * Reads one finalized chunk as bytes so it can be uploaded. The path is validated in Rust against
+   * the active session directory; the renderer cannot choose an arbitrary file.
+   */
+  readChunkBytes(localFile: string): Promise<Uint8Array>;
+  /** Reads a chunk from a named past session, which is how a crash-recovered recording is uploaded. */
+  readSessionChunk(sessionId: string, localFile: string): Promise<Uint8Array>;
+  /**
+   * Closes a crash-interrupted session (`interrupted` → `stopped`) and attaches it to a meeting,
+   * returning its manifest so the upload queue can drain it. Audio is never touched.
+   */
+  prepareRecoveredUpload(
+    sessionId: string,
+    workspaceId: string | null,
+    meetingId: string | null,
+  ): Promise<RecorderManifest>;
+  /** Opens an https URL in the system browser, which is where sign-in always happens. */
+  openExternal(url: string): Promise<void>;
+  /** Quits the app. Only callable once capture has stopped, so a live recording is never dropped. */
+  finishClose(): Promise<void>;
   subscribe(
     next: (event: RecorderEvent) => void,
     onError: (error: RecorderError) => void,
@@ -202,6 +258,33 @@ function createTauriBridge(): RecorderBridge {
     addNote: (text) => call(COMMANDS.addNote, { text }, z.unknown(), 'note'),
     scanSessions: () =>
       call(COMMANDS.scanSessions, undefined, recoveryReportSchema, 'recovery report'),
+    linkMeeting: (workspaceId, meetingId) =>
+      call(
+        COMMANDS.linkMeeting,
+        { payload: { workspaceId, meetingId } },
+        recorderStatusSchema,
+        'status',
+      ),
+    readChunkBytes: (localFile) =>
+      call(COMMANDS.readChunkBytes, { localFile }, z.string(), 'chunk bytes').then((encoded) =>
+        decodeBase64(encoded),
+      ),
+    readSessionChunk: (sessionId, localFile) =>
+      call(
+        COMMANDS.readSessionChunk,
+        { sessionId, localFile },
+        z.string(),
+        'recovered chunk bytes',
+      ).then((encoded) => decodeBase64(encoded)),
+    prepareRecoveredUpload: (sessionId, workspaceId, meetingId) =>
+      call(
+        COMMANDS.prepareRecoveredUpload,
+        { payload: { sessionId, workspaceId, meetingId } },
+        recorderManifestSchema,
+        'recovered manifest',
+      ),
+    openExternal: (url) => call<void>(COMMANDS.openExternal, { url }, z.void(), 'open browser'),
+    finishClose: () => call<void>(COMMANDS.finishClose, undefined, z.void(), 'close app'),
     subscribe: (next, onError) => {
       let disposed = false;
       let unlisten: (() => void) | undefined;
@@ -247,6 +330,12 @@ function unavailableBridge(): RecorderBridge {
     markImportant: fail,
     addNote: fail,
     scanSessions: fail,
+    linkMeeting: fail,
+    readChunkBytes: fail,
+    readSessionChunk: fail,
+    prepareRecoveredUpload: fail,
+    openExternal: fail,
+    finishClose: fail,
     subscribe: () => () => undefined,
   };
 }

@@ -2378,6 +2378,8 @@ export class Phase4BackboneService {
       activeRecordingId: activeRecording?.id ?? null,
       verifiedChunkCount,
       totalChunkCount,
+      canonicalDurationMs: activeRecording?.canonical_duration_ms ?? null,
+      detectedLanguages: meeting.detected_languages ?? [],
       jobs: jobsRes.rows.map(mapJobRow),
       timeline,
     };

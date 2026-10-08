@@ -84,6 +84,14 @@
       "types": "./src/observability.ts",
       "import": "./src/observability.ts"
     },
+    "./postgres-executor": {
+      "types": "./src/postgres-executor.ts",
+      "import": "./src/postgres-executor.ts"
+    },
+    "./desktop": {
+      "types": "./src/desktop-client.ts",
+      "import": "./src/desktop-client.ts"
+    },
     "./worker-cli": {
       "types": "./src/worker-cli.ts",
       "import": "./src/worker-cli.ts"
@@ -95,6 +103,7 @@
     "@suhbat/shared": "0.1.0",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.117.2",
+    "pg": "^8.16.3",
     "server-only": "0.0.1"
   },
   "peerDependencies": {

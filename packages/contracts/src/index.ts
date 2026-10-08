@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export * from './recorder';
+export * from './desktop';
 export * from './upload';
 export * from './transcription';
 export * from './intelligence';

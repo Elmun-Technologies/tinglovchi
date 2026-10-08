@@ -7,11 +7,15 @@
        CGRequestScreenCaptureAccess() in the native bridge. -->
   <key>NSMicrophoneUsageDescription</key>
   <string>SUHBAT records your microphone so meeting audio can be saved on this Mac.</string>
-  <!-- No network usage: this key documents that none is intended. -->
+  <!-- Outbound HTTPS only, and never a downgrade: App Transport Security stays on so a plain-HTTP
+       API origin cannot be used even if the build variable is edited. Loopback is the one exception,
+       for local development against http://localhost:3000. -->
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsArbitraryLoads</key>
     <false/>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
   </dict>
 </dict>
 </plist>

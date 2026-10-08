@@ -578,6 +578,16 @@ export const meetingProcessingResponseSchema = z.object({
   activeRecordingId: uuidSchema().nullable(),
   verifiedChunkCount: countSchema,
   totalChunkCount: countSchema,
+  /**
+   * Canonical meeting duration as finalized by the recorder, in milliseconds. `null` until the
+   * recording has been finalized, so a UI can never show a duration it has not been given.
+   */
+  canonicalDurationMs: countSchema.nullable(),
+  /**
+   * Languages the transcription provider actually detected. Empty means "not detected yet", which is
+   * different from "unknown" — a UI must not invent a language to fill the gap.
+   */
+  detectedLanguages: z.array(z.string().min(1).max(32)).default([]),
   jobs: z.array(processingJobDtoSchema),
   timeline: z.object({
     meetingId: uuidSchema(),

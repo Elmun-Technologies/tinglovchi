@@ -130,6 +130,10 @@ function applyEvent(state: UiState, event: RecorderEvent): UiState {
       return { ...state, busy: false };
     case 'recovery':
       return { ...state, recovery: event.report };
+    case 'close_requested':
+      // Owned by the one-tap flow reducer, not the recorder panel: a close attempt changes nothing
+      // about capture, and the close was already prevented before this event was emitted.
+      return state;
     case 'fault':
       return { ...state, notice: noticeFromError(event.error) };
   }
