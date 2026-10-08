@@ -5,32 +5,40 @@ import {
   type DesktopSessionResponse,
   type WorkspaceSummaryDto,
 } from '@suhbat/contracts';
-import {
-  Phase4ServiceError,
-  type AuthenticatedPrincipal,
-  type SqlExecutor,
-} from './phase4-backbone';
+import { Phase4ServiceError, type AuthenticatedPrincipal } from './phase4-backbone';
 
 /**
  * Desktop pairing, session, and automatic meeting-context service.
  *
- * Everything reachable from the desktop app funnels through here so the authorization story stays
- * auditable in one file:
+ * Authorization model
+ * -------------------
+ * Every statement here reaches PostgreSQL through a narrowly scoped `security definer` function
+ * (`supabase/migrations/202610080002_phase13_desktop_session_rotation.sql`), which is the pattern
+ * this repository already uses for `public.create_workspace(text, text)`. This service therefore
+ * needs **no direct database connection and no service-role credential**: it runs inside the web
+ * process holding only the public anon key and, when there is one, the caller's own session.
  *
- * * A connect code is minted without authentication (device-flow shaped) but is worthless until a
- *   signed-in human approves it in a browser. Only the SHA-256 of the code is persisted.
- * * Exchanging an approved code mints an opaque session token, also stored only as a SHA-256.
- * * Every other desktop call resolves that token back to a `userId`, and *then* runs the exact same
- *   workspace-membership and meeting-ownership checks the web dashboard runs. There is no
- *   desktop-only privilege and no bypass around RLS.
+ * That matters because `docs/production-readiness.md` makes `SUPABASE_DB_URL` and
+ * `SUPABASE_SERVICE_ROLE_KEY` forbidden in the Web deployment. The rules that keep this safe:
  *
- * Nothing here reads or writes meeting content; it only establishes identity and creates the
- * meeting container a recording will be attached to.
+ * * A caller can never name a user. The user id always comes from a credential we verified (a
+ *   desktop access token hash) or from `auth.uid()` inside SQL — never from an argument.
+ * * Credentials are opaque random strings. Only SHA-256 hashes cross into the database, and those
+ *   hashes are computed here, in the application tier, so SQL never sees a plaintext credential.
+ * * An access token is short-lived; a refresh token is long-lived but single-use (it rotates on every
+ *   successful refresh) and revocable. There is no long-lived credential valid for ordinary requests.
+ *
+ * Nothing here reads or writes meeting content. It establishes identity and creates the meeting
+ * container a recording will be attached to.
  */
 
-const CONNECT_CODE_TTL_MS = 10 * 60 * 1000;
-const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
-const POLL_INTERVAL_MS = 2_000;
+export const DESKTOP_ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
+export const DESKTOP_REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const DESKTOP_CONNECT_CODE_TTL_MS = 10 * 60 * 1000;
+export const DESKTOP_POLL_INTERVAL_MS = 2_000;
+/** Bounded so an anonymous caller cannot grow the pairing table without limit. */
+export const DESKTOP_MAX_LIVE_CONNECT_CODES = 2_000;
+
 /** Crockford-style alphabet: no I, L, O, U, so a code read aloud or typed is unambiguous. */
 const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 const CODE_GROUP_LENGTH = 4;
@@ -38,57 +46,54 @@ const CODE_GROUPS = 3;
 
 const WORKSPACE_ROLE_VALUES = new Set(['owner', 'admin', 'member']);
 
-export type DesktopConnectCodeRow = {
-  id: string;
-  code_hash: string;
-  status: 'pending' | 'authorized' | 'consumed' | 'expired';
-  user_id: string | null;
-  workspace_id: string | null;
-  client_label: string | null;
-  created_at: unknown;
-  expires_at: unknown;
-  authorized_at: unknown;
-  consumed_at: unknown;
+/**
+ * How this service talks to the database.
+ *
+ * Deliberately tiny: one method taking a function name and named arguments, returning the decoded
+ * payload. The web app supplies a Supabase `rpc` implementation; the tests supply a PGlite one. No
+ * connection string, driver, or table name ever appears on this side of the boundary.
+ */
+export type DesktopRpc = {
+  call(fn: string, args?: Record<string, unknown>): Promise<unknown>;
 };
 
-export type DesktopSessionRow = {
-  id: string;
-  token_hash: string;
-  user_id: string;
-  last_workspace_id: string | null;
-  client_label: string | null;
-  created_at: unknown;
-  last_used_at: unknown;
-  expires_at: unknown;
-  revoked_at: unknown;
-};
+type RpcFailure = { code: string; message: string };
 
-export type WorkspaceSummaryRow = {
-  id: string;
-  name: string;
-  role: string;
-  default_meeting_type_id: string | null;
-  default_meeting_type_label: string | null;
-  meeting_type_count: number | string;
-};
+/** Maps a database-raised SQLSTATE onto the API error vocabulary. */
+function rpcFailure(cause: unknown, fallback: string): RpcFailure {
+  const raw = cause as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown } | null;
+  const code = typeof raw?.code === 'string' ? raw.code : '';
+  const message =
+    typeof raw?.message === 'string' && raw.message.trim() ? raw.message.trim() : fallback;
+  return { code, message };
+}
 
-export type DesktopMeetingRow = {
-  id: string;
-  workspace_id: string;
-  title: string;
-  status: string;
-  meeting_type_id: string;
-  company_id: string | null;
-  project_id: string | null;
-  created_by: string;
-  started_at: unknown;
-  created_at: unknown;
-};
+/**
+ * Translates a Postgres error into the right HTTP status.
+ *
+ * `42501` is insufficient privilege (wrong workspace), `28000`/`28001` are "not authenticated" and
+ * "session no longer valid", `P0002` is "no such row", and `22023` is an invalid parameter. Anything
+ * unrecognised stays a 500 so a genuine bug is never reported to the client as a user mistake.
+ */
+function rpcError(cause: unknown, fallback: string): Phase4ServiceError {
+  const { code, message } = rpcFailure(cause, fallback);
+  if (code === '42501') return new Phase4ServiceError(403, 'unauthorized', message);
+  if (code === '28000') return new Phase4ServiceError(401, 'unauthenticated', message);
+  if (code === '28001') return new Phase4ServiceError(401, 'unauthorized', message);
+  if (code === 'P0002') return new Phase4ServiceError(404, 'not_found', message);
+  if (code === '22023') return new Phase4ServiceError(400, 'validation_failed', message);
+  if (code === 'P0001') return new Phase4ServiceError(429, 'rate_limited', message);
+  if (code === '23505' || code === '23503' || code === '23514') {
+    return new Phase4ServiceError(409, 'idempotency_conflict', message);
+  }
+  return new Phase4ServiceError(500, 'internal_error', message);
+}
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+/** 60 bits from a CSPRNG, grouped so a human can read it back without confusing glyphs. */
 function randomCode(): string {
   const bytes = randomBytes(CODE_GROUP_LENGTH * CODE_GROUPS);
   const groups: string[] = [];
@@ -109,13 +114,22 @@ function randomToken(): string {
 function toIso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'string') return value;
-  return new Date(String(value)).toISOString();
+  return new Date().toISOString();
 }
 
 function toNumber(value: unknown): number {
-  if (typeof value === 'number') return value;
-  const parsed = Number(value);
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function rows(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[];
+  if (payload && typeof payload === 'object') return [payload as Record<string, unknown>];
+  return [];
+}
+
+function firstRow(payload: unknown): Record<string, unknown> | null {
+  return rows(payload)[0] ?? null;
 }
 
 export type CreateDesktopConnectCodeResult = {
@@ -125,272 +139,303 @@ export type CreateDesktopConnectCodeResult = {
   pollIntervalMs: number;
 };
 
-export class DesktopClientService {
-  private readonly db: SqlExecutor;
+export type DesktopSessionContext = {
+  userId: string;
+  workspaceId: string | null;
+};
 
-  constructor(options: { db: SqlExecutor }) {
-    this.db = options.db;
+export class DesktopClientService {
+  private readonly rpc: DesktopRpc;
+
+  constructor(options: { rpc: DesktopRpc }) {
+    this.rpc = options.rpc;
   }
 
   /**
-   * Step 1 — mint a pairing code. Deliberately unauthenticated: the desktop has no credential yet.
-   * The code is high-entropy, expires in ten minutes, and is useless until a human approves it.
+   * Mints a pairing code. Unauthenticated by design — the desktop has no credential yet — but the
+   * row is worthless until a signed-in human approves it, and creation is bounded by a live-code
+   * ceiling so an anonymous caller cannot use this to grow the table.
    */
-  async createConnectCode(rawInput?: {
-    clientLabel?: string;
-  }): Promise<CreateDesktopConnectCodeResult> {
-    const clientLabel = rawInput?.clientLabel?.trim().slice(0, 80) || null;
+  async createConnectCode(
+    rawInput?: { clientLabel?: string },
+  ): Promise<CreateDesktopConnectCodeResult> {
     const code = randomCode();
-    const expiresAt = new Date(Date.now() + CONNECT_CODE_TTL_MS);
+    let expiresAt: string;
+    try {
+      const row = firstRow(
+        await this.rpc.call('desktop_create_connect_code', {
+          p_code_hash: sha256Hex(code),
+          p_client_label: rawInput?.clientLabel?.slice(0, 80) ?? null,
+          p_ttl_seconds: Math.floor(DESKTOP_CONNECT_CODE_TTL_MS / 1000),
+          p_max_live_codes: DESKTOP_MAX_LIVE_CONNECT_CODES,
+        }),
+      );
+      if (!row) throw new Error('no row returned');
+      expiresAt = toIso(row.expires_at);
+    } catch (cause) {
+      throw rpcError(cause, 'Could not create a pairing code.');
+    }
 
-    await this.db.query(
-      `insert into public.desktop_connect_codes
-         (code_hash, status, client_label, expires_at)
-       values ($1, 'pending', $2, $3)`,
-      [sha256Hex(code), clientLabel, expiresAt.toISOString()],
-    );
+    return { code, status: 'pending', expiresAt, pollIntervalMs: DESKTOP_POLL_INTERVAL_MS };
+  }
 
+  /**
+   * Answers 'pending' for codes that do not exist, so a caller cannot probe for other devices. The
+   * desktop stops polling on its own deadline rather than being told a code expired.
+   */
+  async connectCodeStatus(
+    rawCode: string | null | undefined,
+  ): Promise<{ status: 'pending' | 'authorized' | 'consumed'; pollIntervalMs: number }> {
+    const parsed = desktopConnectCodeSchema.safeParse(rawCode);
+    if (!parsed.success) return { status: 'pending', pollIntervalMs: DESKTOP_POLL_INTERVAL_MS };
+
+    let status: string;
+    try {
+      const row = firstRow(
+        await this.rpc.call('desktop_connect_code_status', { p_code_hash: sha256Hex(parsed.data) }),
+      );
+      status = typeof row?.status === 'string' ? row.status : 'pending';
+    } catch (cause) {
+      throw rpcError(cause, 'Could not read the pairing code status.');
+    }
     return {
-      code,
-      status: 'pending',
-      expiresAt: expiresAt.toISOString(),
-      pollIntervalMs: POLL_INTERVAL_MS,
+      status: status === 'authorized' || status === 'consumed' ? status : 'pending',
+      pollIntervalMs: DESKTOP_POLL_INTERVAL_MS,
     };
   }
 
   /**
-   * Polling read for the desktop: is the code I am holding approved yet?
+   * Binds an approved code to the approving user and a workspace they belong to.
    *
-   * Deliberately lossy. `pending`, `expired`, and `unknown` all answer `pending` to the caller, so
-   * this endpoint cannot be used to discover which codes exist. It never reveals a user or workspace.
-   */
-  async connectCodeStatus(rawCode: string | null | undefined): Promise<{
-    status: 'pending' | 'authorized' | 'consumed';
-    pollIntervalMs: number;
-  }> {
-    if (!rawCode) return { status: 'pending', pollIntervalMs: POLL_INTERVAL_MS };
-    const parsed = desktopConnectCodeSchema.safeParse(rawCode);
-    if (!parsed.success) return { status: 'pending', pollIntervalMs: POLL_INTERVAL_MS };
-    const res = await this.db.query<DesktopConnectCodeRow>(
-      `select * from public.desktop_connect_codes where code_hash = $1`,
-      [sha256Hex(parsed.data.toUpperCase())],
-    );
-    const row = res.rows[0];
-    if (!row) return { status: 'pending', pollIntervalMs: POLL_INTERVAL_MS };
-    if (row.status === 'authorized') return { status: 'authorized', pollIntervalMs: POLL_INTERVAL_MS };
-    if (row.status === 'consumed') return { status: 'consumed', pollIntervalMs: POLL_INTERVAL_MS };
-    return { status: 'pending', pollIntervalMs: POLL_INTERVAL_MS };
-  }
-
-  /**
-   * Step 2 — a signed-in human approves a code in the browser. Requires an authenticated principal
-   * and an active membership in the workspace being granted.
+   * The user id comes from the caller's Supabase JWT inside SQL, so this can never be invoked on
+   * behalf of somebody else.
    */
   async authorizeConnectCode(
-    authInput: AuthenticatedPrincipal | null | undefined,
-    rawCode: string,
-    workspaceId?: string | null,
-  ): Promise<{ status: 'authorized'; workspaceId: string | null }> {
-    const userId = requireUserId(authInput);
+    auth: AuthenticatedPrincipal | null | undefined,
+    rawCode: string | null | undefined,
+    workspaceId: unknown,
+  ): Promise<{ code: string; status: 'authorized'; workspaceId: string }> {
+    requireUserId(auth);
     const parsed = desktopConnectCodeSchema.safeParse(rawCode);
     if (!parsed.success) {
       throw new Phase4ServiceError(400, 'validation_failed', 'That is not a valid connect code.');
     }
-    const code = parsed.data.toUpperCase();
-
-    const resolvedWorkspaceId = workspaceId
-      ? await this.assertActiveMembership(userId, workspaceId)
-      : await this.firstWorkspaceId(userId);
-    if (!resolvedWorkspaceId) {
-      throw new Phase4ServiceError(
-        400,
-        'validation_failed',
-        'You do not belong to an active workspace yet. Create one before connecting the desktop app.',
-      );
+    if (typeof workspaceId !== 'string' || !workspaceId) {
+      throw new Phase4ServiceError(400, 'validation_failed', 'A workspace is required.');
     }
 
-    const now = new Date();
-    const res = await this.db.query<DesktopConnectCodeRow>(
-      `update public.desktop_connect_codes
-          set status = 'authorized',
-              user_id = $2,
-              workspace_id = $3,
-              authorized_at = $4
-        where code_hash = $1
-          and status = 'pending'
-          and expires_at > $4
-        returning *`,
-      [sha256Hex(code), userId, resolvedWorkspaceId, now.toISOString()],
-    );
-    const row = res.rows[0];
-    if (!row) {
-      throw new Phase4ServiceError(
-        404,
-        'not_found',
-        'That code is not waiting for approval. It may have expired or already been used — request a new one in the app.',
-      );
+    try {
+      await this.rpc.call('desktop_authorize_connect_code', {
+        p_code_hash: sha256Hex(parsed.data),
+        p_workspace_id: workspaceId,
+      });
+    } catch (cause) {
+      throw rpcError(cause, 'Could not approve that pairing code.');
     }
-    return { status: 'authorized', workspaceId: resolvedWorkspaceId };
+    return { code: parsed.data, status: 'authorized', workspaceId };
   }
 
   /**
-   * Step 3 — exchange an approved code for a session token. Single use: the code burns here, and the
-   * plaintext token is returned exactly once and never stored.
+   * Trades one approved code for a session.
+   *
+   * The single-use guarantee lives in the database: `desktop_exchange_connect_code` claims the code
+   * with `UPDATE ... WHERE status = 'authorized' ... RETURNING` and inserts the session from that one
+   * statement. Concurrent exchanges cannot both win, and a second attempt simply finds nothing to
+   * claim and answers 404.
    */
-  async exchangeConnectCode(rawInput: {
-    code: string;
-    clientLabel?: string;
-  }): Promise<DesktopSessionResponse> {
+  async exchangeConnectCode(
+    rawInput: { code?: string; clientLabel?: string },
+  ): Promise<DesktopSessionResponse> {
     const parsed = desktopConnectCodeSchema.safeParse(rawInput?.code);
     if (!parsed.success) {
       throw new Phase4ServiceError(400, 'validation_failed', 'That is not a valid connect code.');
     }
-    const code = parsed.data.toUpperCase();
-    const clientLabel = rawInput?.clientLabel?.trim().slice(0, 80) || null;
-    const now = new Date();
 
-    const res = await this.db.query<DesktopConnectCodeRow>(
-      `select * from public.desktop_connect_codes where code_hash = $1`,
-      [sha256Hex(code)],
-    );
-    const row = res.rows[0];
-    if (!row || row.status !== 'authorized' || !row.user_id) {
+    const accessToken = randomToken();
+    const refreshToken = randomToken();
+    let row: Record<string, unknown> | null;
+    try {
+      row = firstRow(
+        await this.rpc.call('desktop_exchange_connect_code', {
+          p_code_hash: sha256Hex(parsed.data),
+          p_access_token_hash: sha256Hex(accessToken),
+          p_refresh_token_hash: sha256Hex(refreshToken),
+          p_access_ttl_seconds: Math.floor(DESKTOP_ACCESS_TOKEN_TTL_MS / 1000),
+          p_refresh_ttl_seconds: Math.floor(DESKTOP_REFRESH_TOKEN_TTL_MS / 1000),
+          p_client_label: rawInput?.clientLabel?.slice(0, 80) ?? null,
+        }),
+      );
+    } catch (cause) {
+      throw rpcError(cause, 'Could not exchange that pairing code.');
+    }
+    if (!row) {
       throw new Phase4ServiceError(
         404,
         'not_found',
-        'That code has not been approved yet. Open the link in the app, sign in, and approve it.',
+        'That pairing code has not been approved, has expired, or was already used.',
       );
     }
-    if (new Date(toIso(row.expires_at)).getTime() <= now.getTime()) {
-      await this.db.query(
-        `update public.desktop_connect_codes set status = 'expired' where id = $1 and status = 'authorized'`,
-        [row.id],
-      );
-      throw new Phase4ServiceError(404, 'not_found', 'That code expired. Request a new one.');
-    }
 
-    const token = randomToken();
-    const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
-    await this.db.query(
-      `insert into public.desktop_sessions
-         (token_hash, user_id, last_workspace_id, client_label, expires_at)
-       values ($1, $2, $3, $4, $5)`,
-      [
-        sha256Hex(token),
-        row.user_id,
-        row.workspace_id,
-        clientLabel ?? row.client_label,
-        expiresAt.toISOString(),
-      ],
-    );
-    await this.db.query(
-      `update public.desktop_connect_codes
-          set status = 'consumed', consumed_at = $2
-        where id = $1 and status = 'authorized'`,
-      [row.id, now.toISOString()],
-    );
-
-    const workspaces = await this.listWorkspaces(row.user_id);
+    const userId = String(row.user_id ?? '');
+    const workspaces = await this.listWorkspaces(accessToken);
     return {
-      token,
-      userId: row.user_id,
-      userEmail: await this.userEmail(row.user_id),
+      accessToken,
+      refreshToken,
+      accessTokenExpiresAt: new Date(
+        Date.now() + DESKTOP_ACCESS_TOKEN_TTL_MS,
+      ).toISOString(),
+      refreshTokenExpiresAt: toIso(row.refresh_token_expires_at),
+      userId,
+      userEmail: typeof row.user_email === 'string' ? row.user_email : null,
       defaultWorkspaceId:
-        row.workspace_id && workspaces.some((workspace) => workspace.id === row.workspace_id)
-          ? row.workspace_id
-          : (workspaces[0]?.id ?? null),
+        (typeof row.workspace_id === 'string' ? row.workspace_id : null) ??
+        (workspaces.length === 1 ? workspaces[0]!.id : null),
       workspaces,
-      expiresAt: expiresAt.toISOString(),
     };
   }
 
   /**
-   * Resolves an `Authorization: Bearer <token>` header back to a principal. Expired, revoked, and
-   * unknown tokens are all the same answer to the client, so the endpoint cannot be used to probe
-   * which users have sessions.
+   * Rotates the refresh credential and issues a fresh access token.
+   *
+   * The presented refresh token stops working the moment this succeeds. Replaying a superseded one
+   * fails, and replaying it well after the rotation revokes the whole session, because at that point
+   * it is far more likely to be a stolen credential than a lost response.
    */
-  async resolveSessionToken(token: string | null | undefined): Promise<AuthenticatedPrincipal | null> {
-    if (!token || typeof token !== 'string' || token.length < 32 || token.length > 512) return null;
-    const now = new Date();
-    const res = await this.db.query<DesktopSessionRow>(
-      `update public.desktop_sessions
-          set last_used_at = $2
-        where token_hash = $1
-          and revoked_at is null
-          and expires_at > $2
-        returning *`,
-      [sha256Hex(token), now.toISOString()],
-    );
-    const row = res.rows[0];
-    if (!row) return null;
-    return { userId: row.user_id };
-  }
+  async refreshSession(
+    rawToken: string | null | undefined,
+  ): Promise<DesktopSessionResponse> {
+    if (typeof rawToken !== 'string' || rawToken.length < 32) {
+      throw new Phase4ServiceError(401, 'unauthorized', 'That refresh token is not valid.');
+    }
 
-  async revokeSessionToken(token: string | null | undefined): Promise<boolean> {
-    if (!token || typeof token !== 'string') return false;
-    const res = await this.db.query(
-      `update public.desktop_sessions
-          set revoked_at = $2
-        where token_hash = $1 and revoked_at is null
-        returning id`,
-      [sha256Hex(token), new Date().toISOString()],
-    );
-    return res.rows.length > 0;
+    const accessToken = randomToken();
+    const refreshToken = randomToken();
+    let row: Record<string, unknown> | null;
+    try {
+      row = firstRow(
+        await this.rpc.call('desktop_refresh_session', {
+          p_refresh_token_hash: sha256Hex(rawToken),
+          p_new_access_token_hash: sha256Hex(accessToken),
+          p_new_refresh_token_hash: sha256Hex(refreshToken),
+          p_access_ttl_seconds: Math.floor(DESKTOP_ACCESS_TOKEN_TTL_MS / 1000),
+          p_refresh_ttl_seconds: Math.floor(DESKTOP_REFRESH_TOKEN_TTL_MS / 1000),
+        }),
+      );
+    } catch (cause) {
+      throw rpcError(cause, 'Could not refresh that session.');
+    }
+    if (!row) {
+      throw new Phase4ServiceError(
+        401,
+        'unauthorized',
+        'That session is no longer valid. Sign in again.',
+      );
+    }
+
+    const workspaces = await this.listWorkspaces(accessToken);
+    return {
+      accessToken,
+      refreshToken,
+      accessTokenExpiresAt: new Date(Date.now() + DESKTOP_ACCESS_TOKEN_TTL_MS).toISOString(),
+      refreshTokenExpiresAt: toIso(row.refresh_token_expires_at),
+      userId: String(row.user_id ?? ''),
+      userEmail: typeof row.user_email === 'string' ? row.user_email : null,
+      defaultWorkspaceId:
+        (typeof row.workspace_id === 'string' ? row.workspace_id : null) ??
+        (workspaces.length === 1 ? workspaces[0]!.id : null),
+      workspaces,
+    };
   }
 
   /**
-   * `GET /api/v1/desktop/session` — who am I, which workspaces may I record into, and which one
-   * should be preselected.
+   * Resolves a short-lived access token to the user it belongs to.
+   *
+   * `desktop_session_context` deliberately still returns a row for an expired access token — the
+   * client needs that to know it should refresh rather than re-authenticate. So the expiry check is
+   * applied here: an expired access token authenticates nothing.
    */
+  async resolveSessionToken(
+    token: string | null | undefined,
+  ): Promise<AuthenticatedPrincipal | null> {
+    if (typeof token !== 'string' || token.length < 32) return null;
+    const row = firstRow(
+      await this.rpc.call('desktop_session_context', { p_access_token_hash: sha256Hex(token) }),
+    );
+    if (!row) return null;
+    const userId = typeof row.user_id === 'string' ? row.user_id : '';
+    if (!userId) return null;
+    const expiresAt = Date.parse(toIso(row.access_token_expires_at));
+    if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) return null;
+    return { userId };
+  }
+
+  /** Logout. Accepts either credential, so a session can be dropped even if the access token died. */
+  async revokeSessionToken(
+    rawToken: string | null | undefined,
+    kind: 'access' | 'refresh' = 'access',
+  ): Promise<boolean> {
+    if (typeof rawToken !== 'string' || rawToken.length < 32) return false;
+    const result = await this.rpc.call('desktop_revoke_session', {
+      p_access_token_hash: kind === 'access' ? sha256Hex(rawToken) : null,
+      p_refresh_token_hash: kind === 'refresh' ? sha256Hex(rawToken) : null,
+    });
+    return result === true;
+  }
+
   async describeSession(
-    authInput: AuthenticatedPrincipal | null | undefined,
+    auth: AuthenticatedPrincipal | null | undefined,
     rawToken: string | null | undefined,
   ): Promise<DesktopSessionInfoResponse> {
-    const userId = requireUserId(authInput);
-    const workspaces = await this.listWorkspaces(userId);
-    const expiresAt = await this.sessionExpiry(rawToken);
-    const preferred = await this.preferredWorkspaceId(userId);
+    const userId = requireUserId(auth);
+    const row = firstRow(
+      await this.rpc.call('desktop_session_context', {
+        p_access_token_hash: typeof rawToken === 'string' ? sha256Hex(rawToken) : null,
+      }),
+    );
+    if (!row) {
+      throw new Phase4ServiceError(401, 'unauthorized', 'That session is no longer valid.');
+    }
+    const workspaces = await this.listWorkspacesFor(rawToken);
     return {
       userId,
-      userEmail: await this.userEmail(userId),
+      userEmail: typeof row.user_email === 'string' ? row.user_email : null,
       defaultWorkspaceId:
-        preferred && workspaces.some((workspace) => workspace.id === preferred)
-          ? preferred
-          : (workspaces[0]?.id ?? null),
+        (typeof row.workspace_id === 'string' ? row.workspace_id : null) ??
+        (workspaces.length === 1 ? workspaces[0]!.id : null),
       workspaces,
-      expiresAt,
+      expiresAt: toIso(row.refresh_token_expires_at),
     };
   }
 
-  /**
-   * Records which workspace the recorder used last, so the next one-tap start does not ask again.
-   * Membership is re-checked on every call, so a stale local choice can never widen access.
-   */
   async rememberWorkspace(
-    authInput: AuthenticatedPrincipal | null | undefined,
+    auth: AuthenticatedPrincipal | null | undefined,
     rawToken: string | null | undefined,
-    workspaceId: string,
+    workspaceId: unknown,
   ): Promise<void> {
-    const userId = requireUserId(authInput);
-    await this.assertActiveMembership(userId, workspaceId);
-    if (!rawToken) return;
-    await this.db.query(
-      `update public.desktop_sessions
-          set last_workspace_id = $2, last_used_at = $3
-        where token_hash = $1 and revoked_at is null`,
-      [sha256Hex(rawToken), workspaceId, new Date().toISOString()],
-    );
+    requireUserId(auth);
+    if (typeof workspaceId !== 'string' || !workspaceId) {
+      throw new Phase4ServiceError(400, 'validation_failed', 'A workspace is required.');
+    }
+    try {
+      await this.rpc.call('desktop_remember_workspace', {
+        p_access_token_hash: typeof rawToken === 'string' ? sha256Hex(rawToken) : null,
+        p_workspace_id: workspaceId,
+      });
+    } catch (cause) {
+      throw rpcError(cause, 'Could not remember that workspace.');
+    }
   }
 
   /**
-   * Automatic meeting context for one-tap recording.
+   * Creates the meeting container a one-tap recording attaches to.
    *
-   * Only `workspaceId` is required. A missing title becomes `Suhbat — 8 Oct, 14:32` (UTC, from the
-   * start instant when supplied), a missing type becomes the workspace's own default, and
-   * company/project stay null. A recording is never blocked by an unfilled form.
+   * Only `workspaceId` is required. A missing title becomes `Suhbat — 8 Oct, 14:32` and a missing
+   * type becomes the workspace's own default, both decided in SQL so the choice cannot drift between
+   * clients. `defaultsApplied` reports which ones were filled in.
    */
   async ensureMeeting(
-    authInput: AuthenticatedPrincipal | null | undefined,
+    auth: AuthenticatedPrincipal | null | undefined,
+    accessToken: string | null | undefined,
     rawInput: {
       workspaceId: string;
       title?: string;
@@ -398,7 +443,6 @@ export class DesktopClientService {
       companyId?: string | null;
       projectId?: string | null;
       startedAt?: string;
-      source?: 'desktop_recorder';
     },
   ): Promise<{
     meeting: {
@@ -416,208 +460,82 @@ export class DesktopClientService {
     };
     defaultsApplied: { title: boolean; meetingType: boolean };
   }> {
-    const userId = requireUserId(authInput);
-    const workspaceId = await this.assertActiveMembership(userId, rawInput?.workspaceId);
-    await this.assertHierarchyInWorkspace(
-      workspaceId,
-      rawInput?.companyId ?? null,
-      rawInput?.projectId ?? null,
-    );
-
-    const typeRes = await this.db.query<{ id: string; display_name: string }>(
-      `select id, display_name
-         from public.meeting_types
-        where workspace_id = $1
-          and is_active
-          and ($2::uuid is null or id = $2::uuid)
-        order by sort_order asc, created_at asc
-        limit 1`,
-      [workspaceId, rawInput?.meetingTypeId ?? null],
-    );
-    const meetingType = typeRes.rows[0];
-    if (!meetingType) {
-      throw new Phase4ServiceError(
-        400,
-        'validation_failed',
-        rawInput?.meetingTypeId
-          ? 'That meeting type does not belong to this workspace.'
-          : 'This workspace has no active meeting type. Add one in workspace settings.',
+    requireUserId(auth);
+    let row: Record<string, unknown> | null;
+    try {
+      row = firstRow(
+        await this.rpc.call('desktop_ensure_meeting', {
+          p_access_token_hash: typeof accessToken === 'string' ? sha256Hex(accessToken) : null,
+          p_workspace_id: rawInput.workspaceId,
+          p_title: rawInput.title ?? null,
+          p_meeting_type_id: rawInput.meetingTypeId ?? null,
+          p_company_id: rawInput.companyId ?? null,
+          p_project_id: rawInput.projectId ?? null,
+          p_started_at: rawInput.startedAt ?? null,
+        }),
       );
+    } catch (cause) {
+      throw rpcError(cause, 'Could not create that meeting.');
     }
-
-    const suppliedTitle = typeof rawInput?.title === 'string' ? rawInput.title.trim() : '';
-    const defaultsTitle = suppliedTitle.length < 2;
-    const title = defaultsTitle ? defaultMeetingTitle(rawInput?.startedAt) : suppliedTitle.slice(0, 180);
-
-    const startedAt = rawInput?.startedAt ? safeIso(rawInput.startedAt) : new Date().toISOString();
-
-    const insertRes = await this.db.query<DesktopMeetingRow>(
-      `insert into public.meetings
-         (workspace_id, meeting_type_id, title, created_by, started_at, company_id, project_id)
-       values ($1, $2, $3, $4, $5, $6, $7)
-       returning id, workspace_id, title, status, meeting_type_id,
-                 company_id, project_id, created_by, started_at, created_at`,
-      [
-        workspaceId,
-        meetingType.id,
-        title,
-        userId,
-        startedAt,
-        rawInput?.companyId ?? null,
-        rawInput?.projectId ?? null,
-      ],
-    );
-    const meeting = insertRes.rows[0]!;
-
+    if (!row) {
+      throw new Phase4ServiceError(404, 'not_found', 'That session is no longer valid.');
+    }
     return {
       meeting: {
-        id: meeting.id,
-        workspaceId: meeting.workspace_id,
-        title: meeting.title,
-        status: meeting.status,
-        meetingTypeId: meeting.meeting_type_id,
-        meetingTypeLabel: meetingType.display_name,
-        companyId: meeting.company_id,
-        projectId: meeting.project_id,
-        createdBy: meeting.created_by,
-        startedAt: toIso(meeting.started_at),
-        createdAt: toIso(meeting.created_at),
+        id: String(row.meeting_id ?? ''),
+        workspaceId: String(row.workspace_id ?? ''),
+        title: String(row.title ?? ''),
+        status: String(row.status ?? 'draft'),
+        meetingTypeId: String(row.meeting_type_id ?? ''),
+        meetingTypeLabel: String(row.meeting_type_label ?? ''),
+        companyId: row.company_id ? String(row.company_id) : null,
+        projectId: row.project_id ? String(row.project_id) : null,
+        createdBy: String(row.created_by ?? ''),
+        startedAt: toIso(row.started_at),
+        createdAt: toIso(row.created_at),
       },
-      defaultsApplied: { title: defaultsTitle, meetingType: !rawInput?.meetingTypeId },
+      defaultsApplied: {
+        title: row.defaults_title === true,
+        meetingType: row.defaults_meeting_type === true,
+      },
     };
   }
 
-  async listWorkspaces(userId: string): Promise<WorkspaceSummaryDto[]> {
-    const res = await this.db.query<WorkspaceSummaryRow>(
-      `select w.id,
-              w.name,
-              m.role::text as role,
-              t.id as default_meeting_type_id,
-              t.display_name as default_meeting_type_label,
-              coalesce(tc.count, 0) as meeting_type_count
-         from public.workspace_members as m
-         join public.workspaces as w on w.id = m.workspace_id
-         left join lateral (
-           select mt.id, mt.display_name
-             from public.meeting_types as mt
-            where mt.workspace_id = w.id and mt.is_active
-            order by mt.sort_order asc, mt.created_at asc
-            limit 1
-         ) as t on true
-         left join lateral (
-           select count(*) as count
-             from public.meeting_types as mt2
-            where mt2.workspace_id = w.id and mt2.is_active
-         ) as tc on true
-        where m.user_id = $1
-          and m.membership_status = 'active'
-        order by w.created_at asc, w.name asc`,
-      [userId],
-    );
-    return res.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      role: WORKSPACE_ROLE_VALUES.has(row.role) ? (row.role as WorkspaceSummaryDto['role']) : 'member',
-      defaultMeetingTypeId: row.default_meeting_type_id,
-      defaultMeetingTypeLabel: row.default_meeting_type_label,
-      meetingTypeCount: toNumber(row.meeting_type_count),
-    }));
-  }
-
-  private async assertActiveMembership(userId: string, workspaceId: unknown): Promise<string> {
-    if (typeof workspaceId !== 'string' || !workspaceId) {
-      throw new Phase4ServiceError(400, 'validation_failed', 'A workspace is required.');
-    }
-    const res = await this.db.query<{ role: string }>(
-      `select role::text as role
-         from public.workspace_members
-        where workspace_id = $1 and user_id = $2 and membership_status = 'active'`,
-      [workspaceId, userId],
-    );
-    if (!res.rows[0]) {
-      throw new Phase4ServiceError(
-        403,
-        'unauthorized',
-        'You are not an active member of that workspace.',
-      );
-    }
-    return workspaceId;
-  }
-
   /**
-   * Company/project stay optional, but when the client does send them they must live in the same
-   * workspace. Checked explicitly so the caller gets a 400 they can act on instead of a raw
-   * foreign-key violation; the composite FKs remain the backstop.
+   * Lists the workspaces a desktop access token can reach.
+   *
+   * Pass `null` to resolve the caller from their Supabase session instead, which is what the browser
+   * dashboard does. Either way the SQL never accepts a caller-supplied user id.
    */
-  private async assertHierarchyInWorkspace(
-    workspaceId: string,
-    companyId: string | null,
-    projectId: string | null,
-  ): Promise<void> {
-    if (companyId) {
-      const res = await this.db.query<{ id: string }>(
-        `select id from public.companies where id = $1 and workspace_id = $2`,
-        [companyId, workspaceId],
-      );
-      if (!res.rows[0]) {
-        throw new Phase4ServiceError(
-          400,
-          'validation_failed',
-          'That company does not belong to this workspace.',
-        );
-      }
-    }
-    if (projectId) {
-      const res = await this.db.query<{ id: string }>(
-        `select id from public.projects where id = $1 and workspace_id = $2`,
-        [projectId, workspaceId],
-      );
-      if (!res.rows[0]) {
-        throw new Phase4ServiceError(
-          400,
-          'validation_failed',
-          'That project does not belong to this workspace.',
-        );
-      }
-    }
+  async listWorkspaces(accessToken: string | null): Promise<WorkspaceSummaryDto[]> {
+    return this.listWorkspacesFor(accessToken);
   }
 
-  private async firstWorkspaceId(userId: string): Promise<string | null> {
-    const workspaces = await this.listWorkspaces(userId);
-    return workspaces[0]?.id ?? null;
+  private async listWorkspacesFor(
+    accessToken: string | null | undefined,
+  ): Promise<WorkspaceSummaryDto[]> {
+    const payload = await this.rpc.call('desktop_list_workspaces', {
+      p_access_token_hash: typeof accessToken === 'string' ? sha256Hex(accessToken) : null,
+    });
+    return rows(payload).map((row) => ({
+        id: String(row.workspace_id ?? ''),
+        name: String(row.name ?? ''),
+        role: WORKSPACE_ROLE_VALUES.has(String(row.role))
+          ? (String(row.role) as WorkspaceSummaryDto['role'])
+          : 'member',
+        defaultMeetingTypeId: row.default_meeting_type_id
+          ? String(row.default_meeting_type_id)
+          : null,
+        defaultMeetingTypeLabel: row.default_meeting_type_label
+          ? String(row.default_meeting_type_label)
+          : null,
+        meetingTypeCount: toNumber(row.meeting_type_count),
+      }));
   }
 
-  private async preferredWorkspaceId(userId: string): Promise<string | null> {
-    if (!userId) return null;
-    return this.firstWorkspaceId(userId);
-  }
-
-  private async userEmail(userId: string): Promise<string | null> {
-    // `auth.users` is not readable from the app schema in a hosted project, and the desktop only
-    // needs enough to label the signed-in account. A missing row is not an error.
-    try {
-      const res = await this.db.query<{ email: string | null }>(
-        `select email from auth.users where id = $1`,
-        [userId],
-      );
-      return res.rows[0]?.email ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  private async sessionExpiry(rawToken: string | null | undefined): Promise<string> {
-    if (!rawToken) return new Date(Date.now() + SESSION_TTL_MS).toISOString();
-    const res = await this.db.query<{ expires_at: unknown }>(
-      `select expires_at from public.desktop_sessions where token_hash = $1`,
-      [sha256Hex(rawToken)],
-    );
-    const row = res.rows[0];
-    return row ? toIso(row.expires_at) : new Date().toISOString();
-  }
 }
 
-function requireUserId(auth: AuthenticatedPrincipal | null | undefined): string {
+export function requireUserId(auth: AuthenticatedPrincipal | null | undefined): string {
   if (!auth || typeof auth.userId !== 'string' || !auth.userId) {
     throw new Phase4ServiceError(
       401,
@@ -628,25 +546,13 @@ function requireUserId(auth: AuthenticatedPrincipal | null | undefined): string 
   return auth.userId;
 }
 
-function safeIso(value: string): string {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
-}
-
-/**
- * `Suhbat — 8 Oct, 14:32`.
- *
- * Server-side and therefore UTC unless the client supplies a start instant; the desktop sends its
- * own local-start-derived title when it can, so the label matches what the user saw on the button.
- */
+/** Mirrors the SQL default so a client-generated title and a server-generated one look identical. */
 export function defaultMeetingTitle(startedAt?: string, now = new Date()): string {
   const at = startedAt ? new Date(startedAt) : now;
-  const instant = Number.isNaN(at.getTime()) ? now : at;
-  const day = instant.getUTCDate();
-  const month = MONTH_LABELS[instant.getUTCMonth()] ?? 'Jan';
-  const hours = String(instant.getUTCHours()).padStart(2, '0');
-  const minutes = String(instant.getUTCMinutes()).padStart(2, '0');
-  return `Suhbat — ${day} ${month}, ${hours}:${minutes}`;
+  const when = Number.isNaN(at.getTime()) ? now : at;
+  return `Suhbat — ${when.getDate()} ${MONTH_LABELS[when.getMonth()] ?? 'Jan'}, ${String(
+    when.getHours(),
+  ).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
 }
 
 const MONTH_LABELS = [
@@ -662,8 +568,4 @@ const MONTH_LABELS = [
   'Oct',
   'Nov',
   'Dec',
-] as const;
-
-export const DESKTOP_CONNECT_CODE_TTL_MS = CONNECT_CODE_TTL_MS;
-export const DESKTOP_SESSION_TTL_MS = SESSION_TTL_MS;
-export const DESKTOP_POLL_INTERVAL_MS = POLL_INTERVAL_MS;
+];

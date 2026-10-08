@@ -26,6 +26,8 @@ import {
   type DesktopConnectCodeResponse,
   type DesktopSessionInfoResponse,
   type DesktopSessionResponse,
+  type RefreshDesktopSessionRequestInput,
+  type RefreshDesktopSessionResponse,
   type DesktopWorkspaceListResponse,
   type FinalizeRecordingRequestInput,
   type FinalizeRecordingResponse,
@@ -43,6 +45,8 @@ import {
   desktopSessionInfoResponseSchema,
   desktopSessionResponseSchema,
   desktopWorkspaceListResponseSchema,
+  refreshDesktopSessionRequestSchema,
+  refreshDesktopSessionResponseSchema,
   finalizeRecordingRequestSchema,
   finalizeRecordingResponseSchema,
   meetingProcessingResponseSchema,
@@ -95,6 +99,12 @@ export class CloudContractError extends CloudError {
   }
 }
 
+/**
+ * Supplies the short-lived access token for each request.
+ *
+ * Called per request rather than captured once, so a refresh that happened a moment ago is picked up
+ * without rebuilding the client.
+ */
 export type CloudTokenProvider = () => string | null;
 
 export type CloudClientOptions = {
@@ -213,7 +223,12 @@ export function createCloudClient(options: CloudClientOptions) {
         authenticated: false,
       }),
 
-    /** `POST /api/v1/desktop/sessions` — trade an approved code for a bearer session. */
+    /**
+     * `POST /api/v1/desktop/sessions` — trade an approved code for a session.
+     *
+     * Returns a short-lived access token and a long-lived, single-use refresh token. The connect code
+     * burns here and can never mint a second session.
+     */
     exchangeConnectCode: (code: string, clientLabel?: string) =>
       call('desktop session', '/api/v1/desktop/sessions', {
         method: 'POST',
@@ -222,16 +237,45 @@ export function createCloudClient(options: CloudClientOptions) {
         authenticated: false,
       }) as Promise<DesktopSessionResponse>,
 
+    /**
+     * `POST /api/v1/desktop/sessions/refresh` — renew the credential pair.
+     *
+     * This is the only call that carries the refresh token, which is why the long-lived credential is
+     * worth having: it never appears in an ordinary data request. On success the previous refresh
+     * token is dead.
+     */
+    refreshSession: async (refreshToken: string): Promise<RefreshDesktopSessionResponse> => {
+      const parsed = refreshDesktopSessionRequestSchema.safeParse({ refreshToken });
+      if (!parsed.success) {
+        throw new CloudError('validation_failed', 'That is not a valid refresh token.', null, false);
+      }
+      return call('session refresh', '/api/v1/desktop/sessions/refresh', {
+        method: 'POST',
+        body: JSON.stringify(parsed.data),
+        schema: refreshDesktopSessionResponseSchema,
+        // The refresh credential *is* the authentication here; there is no access token yet.
+        authenticated: false,
+      }) as Promise<RefreshDesktopSessionResponse>;
+    },
+
     describeSession: () =>
       call('session', '/api/v1/desktop/session', {
         method: 'GET',
         schema: desktopSessionInfoResponseSchema,
       }) as Promise<DesktopSessionInfoResponse>,
 
-    revokeSession: () =>
+    /**
+     * `DELETE /api/v1/desktop/session` — revoke the session server-side.
+     *
+     * Best-effort by design: even if the server is unreachable, clearing the local copy locks this
+     * device. Pass the refresh token when the access token has already expired.
+     */
+    revokeSession: (token: string) =>
       call('sign out', '/api/v1/desktop/session', {
         method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
         schema: z.object({ revoked: z.literal(true), hadSession: z.boolean().optional() }),
+        authenticated: false,
       }),
 
     rememberWorkspace: (workspaceId: string) =>

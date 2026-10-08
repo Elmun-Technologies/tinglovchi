@@ -4,8 +4,9 @@ import {
   desktopConnectCodeHeader,
   handleApiError,
   parseJsonBody,
-  resolveApiContext,
+  resolveDesktopContext,
 } from '../../../../../lib/api-v1-runtime';
+import { consumeConnectCodeBudget } from '../../../../../lib/connect-code-rate-limit';
 
 /**
  * `POST /api/v1/desktop/connect-codes` — mint a short-lived pairing code.
@@ -18,7 +19,27 @@ import {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { desktopService } = await resolveApiContext(request);
+    const { desktopService } = await resolveDesktopContext(request);
+
+    // Unauthenticated write path, so it is metered. See lib/connect-code-rate-limit.ts.
+    const budget = consumeConnectCodeBudget(request);
+    if (!budget.allowed) {
+      return NextResponse.json(
+        {
+          error: {
+            code: 'rate_limited',
+            message: 'Too many pairing codes requested. Wait a moment and try again.',
+          },
+        },
+        {
+          status: 429,
+          headers: budget.retryAfterSeconds
+            ? { 'retry-after': String(budget.retryAfterSeconds) }
+            : undefined,
+        },
+      );
+    }
+
     const body = (await parseJsonBody(request, { allowEmpty: true })) as
       | CreateDesktopConnectCodeRequestInput
       | Record<string, never>;
@@ -29,7 +50,10 @@ export async function POST(request: NextRequest) {
           : undefined
         : undefined;
     const result = await desktopService.createConnectCode({ clientLabel });
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result, {
+      status: 201,
+      headers: { 'cache-control': 'private, no-store' },
+    });
   } catch (cause) {
     return handleApiError(cause);
   }
@@ -43,7 +67,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const { desktopService } = await resolveApiContext(request);
+    const { desktopService } = await resolveDesktopContext(request);
     const code = desktopConnectCodeHeader(request);
     if (!code) {
       return NextResponse.json(
@@ -52,7 +76,10 @@ export async function GET(request: NextRequest) {
       );
     }
     const status = await desktopService.connectCodeStatus(code);
-    return NextResponse.json(status, { status: 200 });
+    return NextResponse.json(status, {
+      status: 200,
+      headers: { 'cache-control': 'private, no-store' },
+    });
   } catch (cause) {
     return handleApiError(cause);
   }

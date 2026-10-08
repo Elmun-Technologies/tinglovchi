@@ -73,6 +73,9 @@ export const copy = {
     diskFull: 'Diskda joy yetarli emas',
     persistenceFailed: 'Yozuv saqlanmadi',
     sessionExpired: 'Sessiya muddati tugagan. Iltimos, qayta kiring.',
+    reauth: 'Qayta kirish',
+    reauthDetail:
+      'Sessiya yangilanmadi. Suhbat qurilmada saqlangan va yuklash davom etadi — faqat qayta kiring.',
     notConfigured:
       'SUHBAT server manzili sozlanmagan. Ilovani qayta o‘rnating yoki VITE_SUHBAT_API_BASE_URL ni tekshiring.',
     generic: 'Nimadir xato ketdi. Suhbat qurilmada saqlangan.',

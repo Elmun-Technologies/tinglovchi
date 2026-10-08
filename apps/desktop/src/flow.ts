@@ -94,6 +94,14 @@ export type FlowAction =
   | { type: 'pairing_code'; code: string | null }
   | { type: 'signed_in'; workspaceId: string | null }
   | { type: 'signed_out' }
+  /**
+   * The session stopped being renewable (refresh rejected or revoked elsewhere).
+   *
+   * Distinct from `signed_out` because this can happen mid-recording, and a recording must never be
+   * interrupted by an authentication event: the audio is already on disk and the upload queue will
+   * keep retrying, so losing the screen would lose the Stop button.
+   */
+  | { type: 'session_expired'; notice: FlowNotice }
   | { type: 'consent_acknowledged'; workspaceId: string | null }
   | { type: 'workspace_selected'; workspaceId: string }
   | { type: 'start_requested' }
@@ -146,6 +154,12 @@ export function reduceFlow(state: FlowState, action: FlowAction): FlowState {
 
     case 'signed_out':
       return { ...initialFlowState, phase: 'signed_out', busy: false };
+
+    case 'session_expired':
+      // Capture wins. The user keeps recording, finishes, and only then sees the sign-in screen, by
+      // which point the audio is safely on disk and the queue is retrying on its own schedule.
+      if (LIVE_PHASES.has(state.phase)) return { ...state, notice: action.notice };
+      return { ...state, phase: 'signed_out', busy: false, notice: action.notice };
 
     case 'consent_acknowledged':
       return {

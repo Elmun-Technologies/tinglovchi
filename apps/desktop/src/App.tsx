@@ -34,7 +34,12 @@ import {
   noticeFromError,
   reduce,
 } from './state.ts';
-import { createSessionStore, resolveWorkspace, type StoredSession } from './session-store.ts';
+import {
+  accessTokenNeedsRefresh,
+  createSessionStore,
+  resolveWorkspace,
+  type StoredSession,
+} from './session-store.ts';
 import {
   CloudError,
   cloudBaseUrl,
@@ -57,6 +62,13 @@ import { CloseGuard } from './views/close-guard.tsx';
 
 const POLL_ACTIVE_MS = 500;
 const POLL_IDLE_MS = 2_000;
+/**
+ * How often the app checks whether the short-lived access token is about to expire.
+ *
+ * Comfortably shorter than the ~15 minute access lifetime, so a renewal always happens before an
+ * expiry rather than after a failed request.
+ */
+const RENEW_CHECK_INTERVAL_MS = 30_000;
 const POLL_PROCESSING_MS = 3_000;
 const UPLOAD_PUMP_MS = 1_500;
 
@@ -84,7 +96,7 @@ export function App() {
       apiBase
         ? createCloudClient({
             baseUrl: apiBase,
-            tokenProvider: () => sessionRef.current.token,
+            tokenProvider: () => sessionRef.current.accessToken,
           })
         : null,
     [apiBase],
@@ -121,6 +133,90 @@ export function App() {
     },
     [sessionStore],
   );
+
+  /**
+   * Drops only the credentials, leaving everything else — workspace choice, consent, and above all
+   * any recording in flight — exactly as it was.
+   *
+   * Used when a refresh fails. The user is sent back to sign-in, but nothing local is discarded:
+   * a recording continues, and a finished one stays on disk until it has uploaded.
+   */
+  const clearCredentials = useCallback(() => {
+    persistSession({
+      ...sessionRef.current,
+      accessToken: null,
+      refreshToken: null,
+      userId: null,
+      userEmail: null,
+    });
+    dispatch({ type: 'session_expired', notice: { tone: 'warn', title: copy.errors.sessionExpired } });
+  }, [persistSession]);
+
+  /** Stores a fresh credential pair from the server, keeping the local workspace choice. */
+  const applyCredentials = useCallback(
+    (credentials: {
+      accessToken: string;
+      refreshToken: string;
+      accessTokenExpiresAt: string;
+      refreshTokenExpiresAt: string;
+      userId: string;
+      userEmail: string | null;
+      defaultWorkspaceId: string | null;
+      workspaces: StoredSession['workspaces'];
+    }) => {
+      persistSession({
+        ...sessionRef.current,
+        accessToken: credentials.accessToken,
+        refreshToken: credentials.refreshToken,
+        accessTokenExpiresAt: credentials.accessTokenExpiresAt,
+        sessionExpiresAt: credentials.refreshTokenExpiresAt,
+        userId: credentials.userId,
+        userEmail: credentials.userEmail,
+        workspaces:
+          credentials.workspaces.length > 0 ? credentials.workspaces : sessionRef.current.workspaces,
+        selectedWorkspaceId:
+          credentials.defaultWorkspaceId ?? sessionRef.current.selectedWorkspaceId,
+      });
+    },
+    [persistSession],
+  );
+
+  /**
+   * Trades the rotating refresh token for a fresh pair.
+   *
+   * The refresh token is single-use: whether this succeeds or fails, the one we just sent will not
+   * work again. On failure the session is over and the UI asks the user to sign in again — which
+   * never costs them a recording, because the audio is already local.
+   */
+  const renewCredentials = useCallback(async (): Promise<boolean> => {
+    if (!cloud) return false;
+    const stored = sessionRef.current;
+    if (!stored.refreshToken) return false;
+    try {
+      const renewed = await cloud.refreshSession(stored.refreshToken);
+      applyCredentials(renewed);
+      return true;
+    } catch {
+      if (sessionRef.current.refreshToken) clearCredentials();
+      return false;
+    }
+  }, [applyCredentials, clearCredentials, cloud]);
+
+  /**
+   * Keeps the access token alive while the app is open.
+   *
+   * Runs on a timer rather than in reaction to a 401 so the common case never sees a failed request
+   * at all. Renewal is a no-op until the token is a minute from expiry.
+   */
+  useEffect(() => {
+    if (!cloud) return;
+    const timer = window.setInterval(() => {
+      const stored = sessionRef.current;
+      if (!stored.refreshToken || uploadingRef.current) return;
+      if (accessTokenNeedsRefresh(stored)) void renewCredentials();
+    }, RENEW_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [cloud, renewCredentials]);
 
   const notice = flow.notice ?? panel.notice;
 
@@ -193,10 +289,21 @@ export function App() {
       const stored = sessionStore.read();
       let workspaces = stored.workspaces;
       let selectedWorkspaceId = stored.selectedWorkspaceId;
-      let signedIn = Boolean(stored.token);
+      let signedIn = Boolean(stored.refreshToken);
       let userEmail = stored.userEmail;
 
-      if (stored.token) {
+      if (stored.refreshToken) {
+        // A short-lived access token is expected to be stale after a restart or a long sleep. Renew
+        // it before touching anything else so the rest of the boot path sees a working credential.
+        if (accessTokenNeedsRefresh(stored)) {
+          const renewed = await renewCredentials();
+          if (cancelled) return;
+          if (!renewed) {
+            // Refresh failed. The sign-in screen is already showing; stop here rather than
+            // hammering the API with a credential we know is dead.
+            return;
+          }
+        }
         try {
           const info = await cloud.describeSession();
           if (cancelled) return;
@@ -204,11 +311,24 @@ export function App() {
           userEmail = info.userEmail;
           selectedWorkspaceId = info.defaultWorkspaceId ?? selectedWorkspaceId;
         } catch (cause) {
-          // An expired or revoked session is a normal state, not a crash: drop the local token and
-          // ask for sign-in. Nothing else is cleared, so the workspace choice survives.
           if (cause instanceof CloudError && (cause.code === 'unauthorized' || cause.code === 'not_found')) {
-            persistSession({ ...stored, token: null, userId: null, userEmail: null });
-            signedIn = false;
+            // One attempt at renewal, in case the access token expired between the check above and
+            // this call. If that fails too, the session really is gone.
+            const renewed = await renewCredentials();
+            if (cancelled) return;
+            if (renewed) {
+              try {
+                const retry = await cloud.describeSession();
+                if (cancelled) return;
+                workspaces = retry.workspaces;
+                userEmail = retry.userEmail;
+                selectedWorkspaceId = retry.defaultWorkspaceId ?? selectedWorkspaceId;
+              } catch {
+                if (!cancelled) signedIn = false;
+              }
+            } else {
+              signedIn = false;
+            }
           } else if (!cancelled) {
             fail(cause, { tone: 'error', title: copy.errors.generic });
           }
@@ -217,11 +337,11 @@ export function App() {
 
       if (cancelled) return;
       persistSession({
-        ...stored,
+        ...sessionRef.current,
         workspaces,
         selectedWorkspaceId,
         userEmail,
-        token: signedIn ? stored.token : null,
+        accessToken: signedIn ? sessionRef.current.accessToken : null,
       });
       const workspace = selectedWorkspaceId ?? (workspaces.length === 1 ? workspaces[0]!.id : null);
       dispatch({
@@ -395,16 +515,7 @@ export function App() {
         if (cancelled || status.status !== 'authorized') return;
         const created = await cloud.exchangeConnectCode(flow.pairingCode!, 'SUHBAT desktop');
         if (cancelled) return;
-        const next: StoredSession = {
-          token: created.token,
-          userId: created.userId,
-          userEmail: created.userEmail,
-          workspaces: created.workspaces,
-          selectedWorkspaceId: created.defaultWorkspaceId,
-          consentAcknowledgedAt: null,
-          sessionExpiresAt: created.expiresAt,
-        };
-        persistSession(next);
+        applyCredentials(created);
         setAuthPhase('idle');
         dispatch({
           type: 'signed_in',
@@ -529,14 +640,24 @@ export function App() {
   }, [apiBase, bridge, flow.meeting]);
 
   const signOut = useCallback(async () => {
-    if (cloud) {
+    const stored = sessionRef.current;
+    if (cloud && stored.refreshToken) {
       try {
-        await cloud.revokeSession();
+        // Revoke with the refresh token: it is still valid even when the access token has expired,
+        // which is exactly when "sign out" matters most.
+        await cloud.revokeSession(stored.accessToken ?? stored.refreshToken);
       } catch {
-        // Revoking is best-effort: clearing the local token is what actually locks this device.
+        // Revoking is best-effort: clearing the local copy is what actually locks this device.
       }
     }
-    persistSession({ ...sessionRef.current, token: null, userId: null, userEmail: null, consentAcknowledgedAt: null });
+    persistSession({
+      ...stored,
+      accessToken: null,
+      refreshToken: null,
+      userId: null,
+      userEmail: null,
+      consentAcknowledgedAt: null,
+    });
     meetingRef.current = null;
     setSettingsOpen(false);
     dispatch({ type: 'signed_out' });
@@ -560,7 +681,7 @@ export function App() {
       const next: StoredSession = { ...sessionRef.current, selectedWorkspaceId: workspaceId };
       persistSession(next);
       dispatch({ type: 'workspace_selected', workspaceId });
-      if (cloud && sessionRef.current.token) {
+      if (cloud && sessionRef.current.accessToken) {
         void cloud.rememberWorkspace(workspaceId).catch(() => undefined);
       }
       setSettingsOpen(false);
@@ -576,7 +697,7 @@ export function App() {
    * the switcher can only ever offer workspaces this account is really a member of.
    */
   useEffect(() => {
-    if (!settingsOpen || !cloud || !sessionRef.current.token) return;
+    if (!settingsOpen || !cloud || !sessionRef.current.accessToken) return;
     let cancelled = false;
     void (async () => {
       try {

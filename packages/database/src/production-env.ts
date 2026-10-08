@@ -101,6 +101,28 @@ export function validateProductionEnvironment(
     }
   }
 
+  // 3b. Trust boundary: the reverse of the check above.
+  //
+  // `docs/production-readiness.md` marks the database URL and the service-role key as
+  // "No (Forbidden in Web)". The web process talks to Postgres only through the anon-key Supabase
+  // client, under RLS; privileged SQL lives in the worker. A deployment that hands the web a
+  // database credential has silently widened the blast radius of every web vulnerability, so it is
+  // rejected loudly rather than tolerated.
+  if (role === 'web') {
+    if (env.SUPABASE_DB_URL?.trim()) {
+      errors.push(
+        'SUPABASE_DB_URL is forbidden in the Web deployment: it is an owner credential that ' +
+          'bypasses RLS. See docs/production-readiness.md.',
+      );
+    }
+    if (env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+      errors.push(
+        'SUPABASE_SERVICE_ROLE_KEY is forbidden in the Web deployment: it bypasses RLS. ' +
+          'See docs/production-readiness.md.',
+      );
+    }
+  }
+
   // 4. Storage / Cloudflare R2
   const storageProvider = (env.STORAGE_PROVIDER ?? '').trim().toLowerCase();
   if (storageProvider !== 'r2') {

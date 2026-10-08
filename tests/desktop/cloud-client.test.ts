@@ -69,17 +69,19 @@ describe('endpoint routing', () => {
     expect(new Headers(h.last().init.headers).get('x-suhbat-connect-code')).toBe('AB12-CDEF-GH34');
   });
 
-  it('exchanges an approved code for a session', async () => {
+  it('exchanges an approved code for a short-lived access and a rotating refresh token', async () => {
     const h = harness({
       handler: () =>
         json(
           {
-            token: 't'.repeat(40),
+            accessToken: 'a'.repeat(43),
+            refreshToken: 'r'.repeat(43),
+            accessTokenExpiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+            refreshTokenExpiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
             userId: '33333333-3333-4333-8333-333333333333',
             userEmail: 'a@b.test',
             defaultWorkspaceId: WORKSPACE.id,
             workspaces: [WORKSPACE],
-            expiresAt: '2027-01-01T00:00:00.000Z',
           },
           201,
         ),
@@ -87,6 +89,49 @@ describe('endpoint routing', () => {
     const session = await h.client.exchangeConnectCode('AB12-CDEF-GH34', 'SUHBAT desktop');
     expect(session.workspaces).toHaveLength(1);
     expect(h.last().url).toBe(`${API}/api/v1/desktop/sessions`);
+
+    // The access credential is minutes, not months; the refresh credential is the long-lived one.
+    const accessMinutes = (Date.parse(session.accessTokenExpiresAt) - Date.now()) / 60_000;
+    const refreshDays = (Date.parse(session.refreshTokenExpiresAt) - Date.now()) / 86_400_000;
+    expect(accessMinutes).toBeLessThanOrEqual(15);
+    expect(refreshDays).toBeGreaterThan(1);
+  });
+
+  it('sends the refresh token only to the refresh endpoint', async () => {
+    const h = harness({
+      handler: () =>
+        json({
+          accessToken: 'b'.repeat(43),
+          refreshToken: 's'.repeat(43),
+          accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+          refreshTokenExpiresAt: new Date(Date.now() + 2_592_000_000).toISOString(),
+          userId: '33333333-3333-4333-8333-333333333333',
+          userEmail: null,
+          defaultWorkspaceId: null,
+          workspaces: [],
+        }),
+    });
+    h.setToken(null);
+    await h.client.refreshSession('r'.repeat(43));
+    expect(h.last().url).toBe(`${API}/api/v1/desktop/sessions/refresh`);
+    // The refresh credential authenticates this call; there is no access token yet.
+    expect(new Headers(h.last().init.headers).get('authorization')).toBeNull();
+    // ...and it must not leak into the URL.
+    expect(h.last().url).not.toContain('r'.repeat(43));
+  });
+
+  it('refuses to send a refresh token that is obviously not one', async () => {
+    const h = harness({ handler: () => json({}) });
+    await expect(h.client.refreshSession('too-short')).rejects.toBeInstanceOf(Error);
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it('revokes with whichever credential is still alive', async () => {
+    const h = harness({ handler: () => json({ revoked: true }) });
+    await h.client.revokeSession('a'.repeat(43));
+    expect(new Headers(h.last().init.headers).get('authorization')).toBe(
+      `Bearer ${'a'.repeat(43)}`,
+    );
   });
 
   it('authenticates every ordinary call with the bearer token', async () => {

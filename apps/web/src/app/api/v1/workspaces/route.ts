@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { desktopWorkspaceListResponseSchema } from '@suhbat/contracts';
 import { Phase4ServiceError } from '@suhbat/database/phase4';
-import { handleApiError, resolveApiContext } from '../../../../lib/api-v1-runtime';
+import {
+  desktopBearerToken,
+  handleApiError,
+  resolveDesktopContext,
+} from '../../../../lib/api-v1-runtime';
 
 /**
  * `GET /api/v1/workspaces` — every workspace the caller belongs to, in the shape the recorder's
@@ -16,15 +20,16 @@ import { handleApiError, resolveApiContext } from '../../../../lib/api-v1-runtim
  */
 export async function GET(request: NextRequest) {
   try {
-    const { desktopService, principal } = await resolveApiContext(request);
+    const { desktopService, principal } = await resolveDesktopContext(request);
     if (!principal) {
       throw new Phase4ServiceError(
         401,
         'unauthenticated',
-        'This session is no longer valid. Sign in again.',
+        'Sign in to list workspaces.',
       );
     }
-    const workspaces = await desktopService.listWorkspaces(principal.userId);
+    // Desktop callers pass the access token; browser callers resolve through their own session.
+    const workspaces = await desktopService.listWorkspaces(desktopBearerToken(request));
     return NextResponse.json(desktopWorkspaceListResponseSchema.parse({ workspaces }), {
       status: 200,
       headers: { 'cache-control': 'private, no-store' },

@@ -4,7 +4,7 @@ import {
   desktopBearerToken,
   handleApiError,
   parseJsonBody,
-  resolveApiContext,
+  resolveDesktopContext,
 } from '../../../../../../lib/api-v1-runtime';
 
 const bodySchema = z.object({ workspaceId: z.string().uuid() });
@@ -17,7 +17,7 @@ const bodySchema = z.object({ workspaceId: z.string().uuid() });
  */
 export async function POST(request: NextRequest) {
   try {
-    const { desktopService, principal } = await resolveApiContext(request);
+    const { desktopService, principal } = await resolveDesktopContext(request);
     const parsed = bodySchema.safeParse(await parseJsonBody(request));
     if (!parsed.success) {
       return NextResponse.json(

@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { desktopConnectCodeSchema } from '@suhbat/contracts';
 import { DesktopClientService } from '@suhbat/database/desktop';
 import { createSupabaseServerClient } from '@suhbat/database/server';
-import { getPostgresExecutor } from '@suhbat/database/postgres-executor';
+import { createDesktopRpc } from '../../lib/desktop-rpc';
 
 /**
  * Approving a desktop pairing code.
@@ -36,10 +36,9 @@ export async function authorizeDesktopConnectAction(formData: FormData): Promise
     redirect(`/login?next=${encodeURIComponent('/desktop/connect')}`);
   }
 
-  const db = await getPostgresExecutor();
-  if (!db) redirect(connectPath('error', { reason: 'database-not-connected' }));
-
-  const service = new DesktopClientService({ db });
+  // Approval goes through a `security definer` RPC on the user's own Supabase session. This
+  // process holds no direct database credential, by design.
+  const service = new DesktopClientService({ rpc: createDesktopRpc(supabase) });
   try {
     const result = await service.authorizeConnectCode(
       { userId: authData.user.id },

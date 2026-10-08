@@ -8,7 +8,7 @@ import {
   desktopBearerToken,
   handleApiError,
   parseJsonBody,
-  resolveApiContext,
+  resolveDesktopContext,
 } from '../../../../../lib/api-v1-runtime';
 
 /**
@@ -19,7 +19,7 @@ import {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { desktopService } = await resolveApiContext(request);
+    const { desktopService } = await resolveDesktopContext(request);
     const body = (await parseJsonBody(request)) as ExchangeDesktopSessionRequestInput;
     const parsed = exchangeDesktopSessionRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const { desktopService, principal } = await resolveApiContext(request);
+    const { desktopService, principal } = await resolveDesktopContext(request);
     const token = desktopBearerToken(request);
     const result = await desktopService.describeSession(principal, token);
     return NextResponse.json(result, {
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const { desktopService } = await resolveApiContext(request);
+    const { desktopService } = await resolveDesktopContext(request);
     const token = desktopBearerToken(request);
     const revoked = await desktopService.revokeSessionToken(token);
     return NextResponse.json({ revoked: true as const, hadSession: revoked }, { status: 200 });

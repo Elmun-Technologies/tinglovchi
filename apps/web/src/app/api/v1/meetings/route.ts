@@ -5,9 +5,10 @@ import {
   type CreateMeetingRequestInput,
 } from '@suhbat/contracts';
 import {
+  desktopBearerToken,
   handleApiError,
   parseJsonBody,
-  resolveApiContext,
+  resolveDesktopContext,
 } from '../../../../lib/api-v1-runtime';
 
 /**
@@ -25,7 +26,7 @@ import {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { desktopService, principal } = await resolveApiContext(request);
+    const { desktopService, principal } = await resolveDesktopContext(request);
     const body = (await parseJsonBody(request)) as CreateMeetingRequestInput;
     const parsed = createMeetingRequestSchema.safeParse(body);
     if (!parsed.success) {
@@ -39,7 +40,11 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
-    const result = await desktopService.ensureMeeting(principal, parsed.data);
+    const result = await desktopService.ensureMeeting(
+      principal,
+      desktopBearerToken(request),
+      parsed.data,
+    );
     return NextResponse.json(createMeetingResponseSchema.parse(result), { status: 201 });
   } catch (cause) {
     return handleApiError(cause);

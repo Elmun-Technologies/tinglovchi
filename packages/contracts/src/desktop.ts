@@ -82,17 +82,42 @@ export const desktopWorkspaceListResponseSchema = z.object({
 });
 export type DesktopWorkspaceListResponse = z.infer<typeof desktopWorkspaceListResponseSchema>;
 
-export const desktopSessionResponseSchema = z.object({
-  /** Opaque bearer token. Returned exactly once; only its SHA-256 is stored server-side. */
-  token: z.string().min(32).max(512),
+/**
+ * The two-credential session model.
+ *
+ * An access token is short-lived and goes out on every request, so losing it costs minutes. A refresh
+ * token is long-lived, is sent to exactly one endpoint, and rotates on every successful use — the
+ * superseded one stops working immediately. Both are opaque random strings; the server stores only
+ * their SHA-256, so a database leak cannot be replayed against the API.
+ *
+ * There is deliberately no long-lived credential that is valid for ordinary API requests.
+ */
+export const desktopCredentialsSchema = z.object({
+  accessToken: z.string().min(32).max(512),
+  refreshToken: z.string().min(32).max(512),
+  /** ISO instants; the client refreshes on its own schedule and never has to guess. */
+  accessTokenExpiresAt: z.string().min(1),
+  refreshTokenExpiresAt: z.string().min(1),
+});
+export type DesktopCredentials = z.infer<typeof desktopCredentialsSchema>;
+
+export const desktopSessionResponseSchema = desktopCredentialsSchema.extend({
   userId: uuidSchema(),
   userEmail: z.string().min(3).nullable(),
   /** The workspace the recorder should preselect: last-used, else the only one, else null. */
   defaultWorkspaceId: uuidSchema().nullable(),
   workspaces: z.array(workspaceSummaryDtoSchema),
-  expiresAt: z.string().min(1),
 });
 export type DesktopSessionResponse = z.infer<typeof desktopSessionResponseSchema>;
+
+/** `POST /api/v1/desktop/sessions/refresh` — trade a rotating refresh token for a fresh pair. */
+export const refreshDesktopSessionRequestSchema = z.object({
+  refreshToken: z.string().min(32).max(512),
+});
+export type RefreshDesktopSessionRequestInput = z.input<typeof refreshDesktopSessionRequestSchema>;
+
+export const refreshDesktopSessionResponseSchema = desktopSessionResponseSchema;
+export type RefreshDesktopSessionResponse = z.infer<typeof refreshDesktopSessionResponseSchema>;
 
 /** `GET /api/v1/desktop/session`. */
 export const desktopSessionInfoResponseSchema = z.object({
@@ -100,6 +125,7 @@ export const desktopSessionInfoResponseSchema = z.object({
   userEmail: z.string().min(3).nullable(),
   defaultWorkspaceId: uuidSchema().nullable(),
   workspaces: z.array(workspaceSummaryDtoSchema),
+  /** When the *session* (the refresh credential) stops being renewable. */
   expiresAt: z.string().min(1),
 });
 export type DesktopSessionInfoResponse = z.infer<typeof desktopSessionInfoResponseSchema>;

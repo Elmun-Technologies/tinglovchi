@@ -84,9 +84,9 @@
       "types": "./src/observability.ts",
       "import": "./src/observability.ts"
     },
-    "./postgres-executor": {
-      "types": "./src/postgres-executor.ts",
-      "import": "./src/postgres-executor.ts"
+    "./worker-executor": {
+      "types": "./src/worker-executor.ts",
+      "import": "./src/worker-executor.ts"
     },
     "./desktop": {
       "types": "./src/desktop-client.ts",
