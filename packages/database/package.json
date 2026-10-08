@@ -84,9 +84,29 @@
       "types": "./src/observability.ts",
       "import": "./src/observability.ts"
     },
+    "./worker-executor": {
+      "types": "./src/worker-executor.ts",
+      "import": "./src/worker-executor.ts"
+    },
+    "./desktop": {
+      "types": "./src/desktop-client.ts",
+      "import": "./src/desktop-client.ts"
+    },
     "./worker-cli": {
       "types": "./src/worker-cli.ts",
       "import": "./src/worker-cli.ts"
+    },
+    "./internal-service-auth": {
+      "types": "./src/internal-service-auth.ts",
+      "import": "./src/internal-service-auth.ts"
+    },
+    "./production-env": {
+      "types": "./src/production-env.ts",
+      "import": "./src/production-env.ts"
+    },
+    "./internal-service-nonce-store": {
+      "types": "./src/internal-service-nonce-store.ts",
+      "import": "./src/internal-service-nonce-store.ts"
     }
   },
   "dependencies": {
@@ -95,6 +115,7 @@
     "@suhbat/shared": "0.1.0",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.117.2",
+    "pg": "^8.16.3",
     "server-only": "0.0.1"
   },
   "peerDependencies": {

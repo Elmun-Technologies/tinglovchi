@@ -829,6 +829,37 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
         Ok(self.status())
     }
 
+    /// Attach the session to a workspace/meeting *after* capture has already begun.
+    ///
+    /// The one-tap flow cannot require a meeting before the button is pressed: the user may be
+    /// offline, and asking them to pick a title and a type first is exactly the friction the product
+    /// exists to remove. So recording starts unlinked, and the desktop creates the meeting as soon as
+    /// it can reach the server, then calls this.
+    ///
+    /// Only the two linkage fields change. The timeline, sources, and every chunk stay byte-identical,
+    /// and the manifest revision still advances so the durable record shows when the link happened.
+    pub fn link_meeting(
+        &mut self,
+        workspace_id: Option<&str>,
+        meeting_id: Option<&str>,
+    ) -> Result<RecorderStatus, RecorderError> {
+        let Some(manifest) = self.manifest.as_mut() else {
+            return Err(not_started());
+        };
+        for (label, value) in [("workspaceId", workspace_id), ("meetingId", meeting_id)] {
+            let Some(value) = value else { continue };
+            crate::manifest::validate_uuid(label, value)?;
+        }
+        if let Some(workspace_id) = workspace_id {
+            manifest.workspace_id = Some(workspace_id.to_string());
+        }
+        if let Some(meeting_id) = meeting_id {
+            manifest.meeting_id = Some(meeting_id.to_string());
+        }
+        self.persist_current_state()?;
+        Ok(self.status())
+    }
+
     /// `Mark important`: a timestamped marker on the canonical timeline. Allowed while paused.
     pub fn mark_important(&mut self, label: Option<&str>) -> Result<MarkerRecord, RecorderError> {
         self.require_open_session()?;

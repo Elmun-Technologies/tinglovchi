@@ -21,6 +21,7 @@ import type { Lookup } from '../../../lib/lookup';
 import type { MeetingBundle } from '../../../lib/meeting-bundle';
 import { ui } from '../../../copy/ui-copy';
 import { MeetingExportPanel } from './export-panel';
+import { MeetingProcessingBanner } from './processing-banner';
 
 /**
  * Meeting overview: what the meeting decided and owed, with the evidence one click away. Numbers here are the
@@ -39,7 +40,7 @@ export function MeetingOverview({
   todayIsoDate: string;
   capabilities: DataCapabilities;
 }) {
-  const { detail, decisions, tasks, facts, questions, transcript } = bundle;
+  const { detail, decisions, tasks, facts, questions, transcript, processing } = bundle;
   const meetingId = detail.id;
   const openQuestions = questions.filter((question) => question.status === 'open');
   const stats = speakingStats(transcript.segments);
@@ -48,6 +49,7 @@ export function MeetingOverview({
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+      <MeetingProcessingBanner processing={processing} />
       <div className="space-y-5">
         <SectionCard
           title={ui.meeting.overview.summary}

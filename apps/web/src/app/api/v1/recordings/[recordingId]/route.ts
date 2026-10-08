@@ -1,16 +1,23 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { handleApiError, resolveApiContext } from '../../../../../lib/api-v1-runtime';
+import { resolveRecordingContext } from '../../../../../lib/recording-gateway';
+
+async function handleApiError(cause: unknown) {
+  const { handleApiError: handle } = await import('../../../../../lib/api-v1-runtime');
+  return handle(cause);
+}
 
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ recordingId: string }> },
 ) {
   try {
-    const { service, principal } = await resolveApiContext(request);
     const { recordingId } = await context.params;
-    const workspaceId = request.nextUrl?.searchParams.get('workspaceId') ?? undefined;
-    const result = await service.getRecording(principal, recordingId, workspaceId);
-    return NextResponse.json(result, { status: 200 });
+    const gateway = await resolveRecordingContext(request);
+    return await gateway.forward({
+      path: `/api/v1/recordings/${encodeURIComponent(recordingId)}`,
+      method: 'GET',
+      searchParams: request.nextUrl?.searchParams,
+    });
   } catch (cause) {
     return handleApiError(cause);
   }
@@ -21,12 +28,12 @@ export async function DELETE(
   context: { params: Promise<{ recordingId: string }> },
 ) {
   try {
-    const { service, principal } = await resolveApiContext(request);
     const { recordingId } = await context.params;
-    const workspaceId = request.nextUrl?.searchParams.get('workspaceId') ?? undefined;
-    const result = await service.deleteRecording(principal, recordingId, workspaceId);
-    return NextResponse.json(result, {
-      status: result.status === 'deleted' ? 200 : 202,
+    const gateway = await resolveRecordingContext(request);
+    return await gateway.forward({
+      path: `/api/v1/recordings/${encodeURIComponent(recordingId)}`,
+      method: 'DELETE',
+      searchParams: request.nextUrl?.searchParams,
     });
   } catch (cause) {
     return handleApiError(cause);

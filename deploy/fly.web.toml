@@ -1,0 +1,49 @@
+# Web — PUBLIC. The only deployment with a public address.
+#
+# SUHBAT_RUNTIME_ROLE=web. Holds no database credential and no processing provider key.
+# All privileged recording work is forwarded to the Recording API over the private network.
+app = "suhbat-web"
+
+[build]
+  dockerfile = "deploy/Dockerfile.web"
+
+[env]
+  SUHBAT_RUNTIME_ROLE = "web"
+  NODE_ENV = "production"
+  SUHBAT_DATA_MODE = "live"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3000
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "get"
+    path = "/api/v1/health"
+    protocol = "http"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

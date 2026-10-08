@@ -13,6 +13,7 @@
 //! * monotonic ticks from a different clock epoch are never subtracted from current readings: the gap
 //!   is recorded as estimated (see `timeline::estimated_gap_record`).
 
+use crate::clock::{Clock, SystemClock};
 use crate::errors::{RecorderError, RecorderErrorCode, SourceKind};
 use crate::manifest::{
     chunk_file_name, idempotency_key, CaptureFormat, ChunkRecord, ChunkState, Checksum, ChecksumAlgorithm, DecimalU128,
@@ -265,6 +266,78 @@ pub fn scan_and_reconcile(
         sessions,
         rejected,
     })
+}
+
+/// Closes a crash-interrupted session so its audio can be uploaded, and returns the manifest.
+///
+/// Recovery never resumes capture into an old session: the audio on disk is finished whether or not
+/// the process was. But the upload path needs a terminal manifest to know every chunk is frozen, so
+/// this performs the one remaining step — `interrupted` (or any non-terminal state left by a crash)
+/// becomes `stopped`, `stoppedAt` is stamped, and the workspace/meeting the desktop has since created
+/// are attached.
+///
+/// Only `manifest.json` is rewritten, atomically, and the revision advances so the durable record shows
+/// what changed. No chunk file is read past its header, moved, truncated, or deleted. A session that
+/// is already stopped is returned unchanged, which makes this safe to call twice.
+///
+/// # Errors
+/// Returns [`RecorderError`] when the manifest cannot be read, parsed, or validated — in which case
+/// nothing is written, because rewriting a manifest we cannot vouch for could destroy the only
+/// description of the audio.
+pub fn close_interrupted_session(
+    session_dir: &Path,
+    workspace_id: Option<&str>,
+    meeting_id: Option<&str>,
+) -> Result<RecorderManifest, RecorderError> {
+    let manifest_path = session_dir.join("manifest.json");
+    let text = std::fs::read_to_string(&manifest_path)?;
+    let mut manifest = RecorderManifest::parse_unvalidated(&text)?;
+    manifest.validate()?;
+
+    if let Some(workspace_id) = workspace_id {
+        crate::manifest::validate_uuid("workspaceId", workspace_id)?;
+        manifest.workspace_id = Some(workspace_id.to_string());
+    }
+    if let Some(meeting_id) = meeting_id {
+        crate::manifest::validate_uuid("meetingId", meeting_id)?;
+        manifest.meeting_id = Some(meeting_id.to_string());
+    }
+
+    if manifest.state != ManifestState::Stopped {
+        let now = crate::clock::SystemClock::new();
+        let stamp = now.wall_clock_rfc3339(now.wall_clock_ms());
+        for source in &mut manifest.sources {
+            if source.ended_at_ticks.is_none() {
+                source.ended_at_ticks = Some(source.started_at_ticks.clone());
+            }
+            if source.state == SourceHealth::Unavailable {
+                // A source that failed stays failed: claiming it recovered would misdescribe the audio.
+            } else if source.sample_map.is_empty() {
+                source.state = SourceHealth::Unavailable;
+            } else {
+                source.state = SourceHealth::Active;
+            }
+        }
+        for interval in &mut manifest.active_intervals {
+            if interval.end_ticks.is_none() {
+                interval.end_ticks = Some(interval.start_ticks.clone());
+                interval.meeting_end_ms = Some(interval.meeting_start_ms);
+            }
+        }
+        for gap in &mut manifest.pause_intervals {
+            if gap.meeting_end_ms <= gap.meeting_start_ms {
+                gap.meeting_end_ms = gap.meeting_start_ms;
+            }
+        }
+        manifest.stopped_at = Some(stamp.clone());
+        manifest.state = ManifestState::Stopped;
+        manifest.revision = manifest.revision.saturating_add(1);
+        manifest.last_updated_at = stamp;
+        manifest.validate()?;
+    }
+
+    write_manifest_atomic(session_dir, &manifest)?;
+    Ok(manifest)
 }
 
 fn origin_of(manifest: &RecorderManifest) -> TimelineOrigin {

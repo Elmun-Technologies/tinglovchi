@@ -11,6 +11,7 @@
   "workspaces": [
     "apps/web",
     "apps/desktop",
+    "apps/recording-api",
     "packages/contracts",
     "packages/product",
     "packages/database",
@@ -28,17 +29,22 @@
     "desktop:build": "npm run build --workspace @suhbat/desktop",
     "test:e2e": "playwright test",
     "format:check": "prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "recording-api:dev": "npm run dev --workspace @suhbat/recording-api",
+    "recording-api:start": "npm run start --workspace @suhbat/recording-api",
+    "worker:start": "tsx packages/database/src/worker-daemon.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
     "@playwright/test": "^1.63.0",
     "@types/node": "22.20.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "eslint": "10.12.0",
     "eslint-plugin-react-hooks": "7.1.1",
     "prettier": "3.9.9",
+    "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1",
     "vite": "8.3.3",

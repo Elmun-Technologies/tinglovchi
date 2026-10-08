@@ -791,7 +791,7 @@ fn conflict(message: impl Into<String>) -> RecorderError {
     RecorderError::new(RecorderErrorCode::ManifestConflict, message, false)
 }
 
-fn validate_uuid(field: &str, value: &str) -> Result<(), RecorderError> {
+pub(crate) fn validate_uuid(field: &str, value: &str) -> Result<(), RecorderError> {
     let parsed = uuid::Uuid::parse_str(value).map_err(|_| invalid(format!("{field} must be a lowercase UUID")))?;
     if parsed.to_string() != value {
         return Err(invalid(format!("{field} must be a canonical lowercase UUID")));

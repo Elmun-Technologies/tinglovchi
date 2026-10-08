@@ -443,6 +443,12 @@ export const recorderEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('recovery'), report: recoveryReportSchema }),
   z.object({ type: z.literal('fault'), error: recorderErrorSchema }),
+  /**
+   * Emitted by the shell (not the coordinator) when the window is closed mid-capture. The close has
+   * already been prevented by the time this reaches the renderer; the renderer shows a "stop and
+   * save" confirmation and then calls `recorder_finish_close`.
+   */
+  z.object({ type: z.literal('close_requested') }),
 ]);
 export type RecorderEvent = z.infer<typeof recorderEventSchema>;
 

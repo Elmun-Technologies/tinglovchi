@@ -1,6 +1,6 @@
 # Recording architecture
 
-**Status:** design only. No recorder, Tauri app, native helper, permission prompt, or sample audio has been implemented or tested in this repository. The execution host inspected for Phase 0 is Linux and has no Rust toolchain; macOS capture cannot be verified here.
+**Status:** the Rust session coordinator, macOS and Windows capture modules, the local manifest/recovery protocol, and the Tauri command layer are implemented. The desktop renderer is a one-tap appliance (see §9). Nothing in this document has been verified on real macOS or Windows hardware from this repository: the execution host used for development is Linux with no Rust toolchain, so `cargo test --workspace --manifest-path apps/desktop/src-tauri/Cargo.toml` has never been run here and every acceptance gate in §8 remains open.
 
 ## 1. Reliability contract
 
@@ -171,4 +171,133 @@ Retention policy is separate from upload acknowledgement. Provide future setting
 
 ## 8. Phase 2 verification gates
 
-On real macOS devices, verify microphone and system audio independently and concurrently; permission unknown/granted/denied flows; absent or unplugged device; pause/resume gaps; audio level; stop/finalization; multiple chunks; long-run clock drift; sleep/wake; app crash at each file/manifest commit point; restart recovery; offline 30-minute capture/upload recovery; checksum mismatch/retry; explicit consent; usable audio playback; storage pressure; and resource use. Keep sample recordings in an approved external test location, not Git. These are future tests, not Phase 0 claims.
+On real macOS devices, verify microphone and system audio independently and concurrently; permission unknown/granted/denied flows; absent or unplugged device; pause/resume gaps; audio level; stop/finalization; multiple chunks; long-run clock drift; sleep/wake; app crash at each file/manifest commit point; restart recovery; offline 30-minute capture/upload recovery; checksum mismatch/retry; explicit consent; usable audio playback; storage pressure; and resource use. Keep sample recordings in an approved external test location, not Git. These are future tests, not claims made by this repository.
+
+## 9. One-tap desktop client
+
+The desktop app is an appliance, not a dashboard. It has exactly one primary control and no forms.
+
+### 9.1 Screens
+
+| Phase | What the user sees | What it is allowed to say |
+| --- | --- | --- |
+| `signed_out` | Connect code, "Brauzerda tasdiqlash" | Nothing else. No email field, no password field. |
+| `consent` | One sentence about what is recorded, "Tushunarli" | Consent must be acknowledged once per device. |
+| `idle` | Logo, workspace name, one large mic button, "Suhbatni boshlash", device status, a small settings affordance | No analytics, no navigation, no cards. |
+| `starting` | Button is busy, nothing else changes | Never a fake spinner that finishes before the recorder does. |
+| `recording` | Red state, large elapsed timer, live waveform, "Suhbat yozilmoqda", Pause, Stop, mic + system-audio indicators | Timer is canonical: it includes pauses and gaps (§3). |
+| `paused` | Timer frozen, "PAUSED", Resume, Stop | The timer does not reset. |
+| `stopping` | Busy; the recorder is finalizing chunk files | Nothing is claimed about the server yet. |
+| `uploading` | "Yuklanmoqda" with **verified / total chunk counts** | Counts only. Never a percentage. |
+| `processing` | "Audio saqlanmoqda" → "Yuklanmoqda" → "Transkripsiya qilinmoqda" → "Tahlil qilinmoqda" | The four headlines are chosen from the server's real `productState`; there is no fifth, invented state. |
+| `ready` | "Suhbat tayyor", title, duration, detected languages, "Natijani ko‘rish" | Duration and languages come from the pipeline, not from the local clock. |
+| `saved_locally` | "Internet yo‘q. Suhbat qurilmada xavfsiz saqlandi." | Honest: the audio is on disk and the queue will retry. |
+| `analysis_failed` | "Suhbat saqlandi. Tahlil vaqtincha bajarilmadi." | The meeting is not lost; the dashboard can retry. |
+
+### 9.2 Start → Stop → Ready
+
+```text
+press mic ──▶ recorder_start ──▶ Rust validates consent + meeting, opens the session
+                                │
+                                ├─ capture (mic + system audio, separate tracks) ──▶ chunk files + manifest
+                                │
+press stop ─▶ recorder_stop ────┴─▶ finalize_open: last chunk sealed, manifest committed
+                                    │
+                                    ├─ online?  upload queue: authorize → PUT bytes at signed URL → verify
+                                    │            └─ duplicate barrier: UNIQUE(recording_source_id, sequence_no)
+                                    │               and the idempotency key (§6) make a re-send a no-op
+                                    └─ offline? saved_locally; bytes stay on disk and the queue keeps retrying
+                                                 │
+                          POST /api/v1/recordings/{id}/finalize ──▶ server verification gate
+                                                 │
+                                    prepare transcription asset → AssemblyAI → diarization
+                                                 │
+                                    canonical transcript → AI analysis → knowledge indexing
+                                                 │
+                     desktop polls GET /api/v1/meetings/{id}/processing ──▶ "ready"
+                                                 │
+                                    "Natijani ko‘rish" → /w/{workspaceId}/meetings/{meetingId}
+```
+
+The desktop **initiates and observes**. It never transcribes, never analyses, and never decides a
+meeting is finished — every processing word it renders is a value the server produced. The only
+exception is the local finalize, which is the recorder's own job and predates this phase.
+
+### 9.3 Automatic meeting creation
+
+Recording is never blocked by a form. The desktop calls `POST /api/v1/meetings` with a workspace id
+and nothing else:
+
+* no `title` → `Suhbat — 8 Oct, 14:32`, generated in local time;
+* no `meetingTypeId` → the workspace's own default type (lowest active sort order);
+* no company/project → both stay `null`, editable from the dashboard.
+
+The response reports which defaults were applied (`defaultsApplied`), so the UI can tell the user the
+title was chosen for them rather than pretending they typed it.
+
+### 9.4 Sign-in: connect code, not credentials in the app
+
+```text
+desktop: POST /api/v1/desktop/connect-codes      →  code "AB12-CDEF-GH34"
+desktop: opens {APP_URL}/desktop/connect         →  browser, real Supabase session
+browser: user signs in, picks a workspace, confirms
+desktop: GET  /api/v1/desktop/connect-codes      →  authorized
+desktop: POST /api/v1/desktop/sessions           →  long-lived bearer token (90 days)
+```
+
+* The code is single-use and expires in 10 minutes. Only its SHA-256 is stored.
+* The session token is returned exactly once and only its SHA-256 is stored. It lives in the
+  renderer's `localStorage` (`suhbat.desktop.v1`), which holds **no** credential beyond it.
+* The token is sent only to the API origin named by `VITE_SUHBAT_API_BASE_URL`. Chunk bytes go to a
+  short-lived signed storage URL that is fetched **without** the token — see §9.5.
+* Email/password never touches the desktop app, and no provider secret ever does.
+
+### 9.5 The network seam
+
+`apps/desktop/src/cloud.ts` is the only module in the renderer allowed to touch the network.
+`tests/desktop/cloud-boundary.test.ts` fails the build if any other renderer file calls `fetch`, builds
+an absolute URL, imports a Supabase client, or reads an environment variable other than
+`VITE_SUHBAT_API_BASE_URL`. The Rust crates contain no HTTP client at all — they stay offline and the
+TypeScript client drives uploads.
+
+Two doors, and only two:
+
+1. **API calls** — `https://{VITE_SUHBAT_API_BASE_URL}/api/v1/…`, always with the session token.
+2. **Chunk bytes** — a signed URL the server issues per chunk, fetched without the session token. A
+   signed URL is a bearer capability; sending the long-lived token to a storage host would leak it
+   into that host's logs.
+
+Rust's contribution is a single-purpose command, `recorder_read_chunk_bytes`, which reads sealed chunk
+bytes from the session directory so the TypeScript client can upload them. It does not know what an
+HTTP request is.
+
+### 9.6 Never deletes a recording
+
+No code path in `recorder-core` removes audio. The only `remove_file` calls are:
+
+* `writer.rs` — a zero-sample chunk that was never written to (`sample_count == 0 || data_bytes == 0`);
+* `storage.rs` — a `manifest.json.tmp-*` temp file left by an interrupted atomic manifest write;
+* `recovery.rs` — a `.wav.partial` shell smaller than one chunk header, i.e. a file that holds no audio.
+
+`remove_dir_all` appears only inside `#[cfg(test)]` modules. `tests/desktop/cloud-boundary.test.ts`
+enforces all of the above so a future change cannot quietly start deleting recordings.
+
+### 9.7 Close guard
+
+While capture is live, the Tauri shell intercepts the window close request and emits
+`close_requested` to the renderer instead of closing. The renderer shows a confirm sheet with two
+choices — keep recording, or stop and save (which runs the same finalize + upload path as pressing
+Stop). A crash is different and needs no consent: on next launch, recovery finds the interrupted
+session, closes its manifest, and offers to upload it.
+
+### 9.8 Test coverage
+
+| Suite | Covers |
+| --- | --- |
+| `tests/desktop/one-tap-flow.test.ts` | Every transition above, duplicate start/stop, workspace switch guard, close guard, crash-recovery entry |
+| `tests/desktop/cloud-client.test.ts` | Endpoint routing, error classification, credential containment, base-URL validation |
+| `tests/desktop/upload-runner.test.ts` | Offline classification, exactly-once upload, resume, no fabricated progress |
+| `tests/desktop/cloud-boundary.test.ts` | The network seam and the never-deletes guarantee |
+| `tests/desktop/recorder-contract.test.ts` | Rust ↔ TypeScript field-by-field agreement |
+| `tests/desktop/rust-structure.test.ts` | `generate_handler!` ↔ `commands.rs` ↔ `bridge.ts` stay in sync |
+| `tests/rls/phase13-desktop-client.test.ts` | Connect codes, session hashing/revocation/expiry, workspace isolation, RLS posture |

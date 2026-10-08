@@ -1,0 +1,29 @@
+# Worker — PRIVATE. Makes outbound connections only; exposes no port at all.
+#
+# SUHBAT_RUNTIME_ROLE=worker. Holds SUPABASE_DB_URL and every provider credential
+# (AssemblyAI, OpenAI, Telegram, automation). Runs the background pipeline.
+#
+# After `fly apps create`, release the public address:
+#   fly ips release <public-ipv4> --app <name>
+#
+# There is no [http_service] and no [[services]] block on purpose. The worker is not
+# in any request path.
+app = "suhbat-worker"
+
+[build]
+  dockerfile = "deploy/Dockerfile.worker"
+
+[env]
+  SUHBAT_RUNTIME_ROLE = "worker"
+  NODE_ENV = "production"
+  WORKER_ID = "suhbat-worker-01"
+  WORKER_CONCURRENCY = "4"
+  WORKER_POLL_INTERVAL_MS = "1000"
+  PROCESSING_MAX_ATTEMPTS = "5"
+  PROCESSING_LEASE_SECONDS = "300"
+
+# auto_stop_machines is false: a stopped worker is a stalled pipeline.
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
