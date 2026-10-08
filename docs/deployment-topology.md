@@ -170,6 +170,43 @@ one table.
   Bounded on purpose — an unbounded delete on a table that somehow grew enormous would hold a lock
   and stall every request behind it. A bounded purge always makes progress and catches up on later
   calls.
+- **Retention is hard-coded** at 120 seconds inside `internal_claim_service_nonce`. It is not a
+  parameter. A replay guard that lets its caller choose how long a nonce stays burned is not a
+  replay guard: an attacker who could reach the function could otherwise request a ten-year
+  retention on a nonce the gateway is about to use. 120 seconds is twice the request timestamp
+  window, which is exactly as long as a nonce needs to be remembered — after that the request would
+  be rejected as stale anyway.
+
+#### These functions are not public Supabase RPCs
+
+In Supabase, `create function` is implicitly executable by `PUBLIC` — meaning anyone holding the
+anon key could call it. For these two that would be a live hole:
+
+- `internal_claim_service_nonce` lets a caller burn an arbitrary nonce. Anyone who can guess or
+  observe the nonce the gateway is about to use can pre-burn it, and the legitimate request is then
+  rejected as a replay. That is a denial of service against the recording pipeline requiring no
+  secret at all.
+- `internal_purge_expired_service_nonces` lets a caller force a delete scan on demand, repeatedly.
+
+Neither takes an identity, neither authorises anything, and neither has any client use. So the
+migration:
+
+1. revokes `all` from `PUBLIC` on both functions;
+2. revokes `all` from `anon`, `authenticated`, and `service_role` **explicitly** — and never grants
+   them back. Revoking rather than merely omitting a grant means a later `alter default privileges`
+   or a well-meaning follow-up migration cannot silently reopen this surface. `service_role` is
+   included because, although it is a server credential, it is still a Supabase *client* role;
+3. grants `execute` to exactly one named private server role, `suhbat_recording_api`, and only if
+   that role exists — an escape hatch for operators who would rather not connect as owner.
+
+The shipped deployment needs **no grant at all**: the Recording API connects with `SUPABASE_DB_URL`
+as the database owner, and the owner requires no `EXECUTE` grant to call a function it owns. After
+applying the migration the ACL should read `postgres=X/postgres` and nothing else.
+
+`tests/security/three-role-deployment.test.ts` asserts all four denials by actually switching to
+`anon` and `authenticated` and attempting the call, and asserts via `has_function_privilege` that no
+client role holds `EXECUTE` — plus a direct read of `pg_proc.proacl` to confirm no `PUBLIC` entry
+survives.
 
 ### Verification order — and why the order is the property
 

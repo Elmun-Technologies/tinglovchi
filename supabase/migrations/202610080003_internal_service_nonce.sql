@@ -19,6 +19,42 @@
 -- already the thing every machine can see. Adding a second stateful system to hold one table would
 -- be another thing to secure, monitor, and fail over, for no gain.
 --
+-- ===========================================================================
+-- WHO MAY CALL THESE FUNCTIONS
+-- ===========================================================================
+--
+-- These are internal Recording API primitives. They are **not** public Supabase RPCs.
+--
+-- In Supabase, a `create function` is implicitly executable by PUBLIC, which means every caller
+-- holding the anon key — i.e. anyone with the project URL — could invoke it. Consider what that
+-- would mean here:
+--
+--   * `internal_claim_service_nonce` lets a caller burn an arbitrary nonce. An attacker who can
+--     guess or observe the nonce the Web gateway is about to use can pre-burn it, and the legitimate
+--     request is then rejected as a replay. That is a denial of service against the recording
+--     pipeline, available to anyone on the internet, with no secret required.
+--   * `internal_purge_expired_service_nonces` lets a caller repeatedly force a delete scan. Driving
+--     it in a loop is a cheap way to put load on the ledger table.
+--
+-- Neither takes any identity, authorises nothing, and neither is ever needed by a client. So the
+-- implicit PUBLIC grant is revoked, and **nothing is granted to `anon` or `authenticated`**. The
+-- grant is not merely absent — it is explicitly revoked, because revocation is what protects
+-- against a later `alter default privileges` or a well-meaning follow-up migration reintroducing it.
+--
+-- The Recording API connects directly with `SUPABASE_DB_URL` as the database owner. The owner needs
+-- no EXECUTE grant to call a function it owns, so **no client-role grant is required at all** for
+-- the shipped deployment.
+--
+-- For an operator who prefers a least-privilege role over connecting as owner, one named private
+-- server role is supported: `suhbat_recording_api`. It is granted conditionally — the migration does
+-- not fail if the role has not been created — and it is a *server* role, never a Supabase client
+-- role. Creating it is out of scope here; the grant exists so the option is documented and
+-- one `create role` away.
+--
+-- `service_role` is revoked explicitly too. It is a server credential rather than an anon-key
+-- credential, but it is still a Supabase *client* role, and this function has no client use case.
+-- ===========================================================================
+
 create table if not exists public.internal_service_nonces (
   id uuid primary key default gen_random_uuid(),
   key_id text not null,
@@ -34,7 +70,7 @@ create table if not exists public.internal_service_nonces (
 comment on table public.internal_service_nonces is
   'One-use nonces for signed Web -> Recording API requests. Shared across every Recording API '
   'machine so a replay cannot be aimed at a machine that has not seen it yet. Written only by the '
-  'Recording API through internal_claim_service_nonce().';
+  'Recording API through internal_claim_service_nonce(); no client role has any privilege on it.';
 
 -- Cleanup scans expired rows in expiry order, so this index is what keeps the purge a bounded
 -- index scan rather than a sequential one.
@@ -58,7 +94,9 @@ alter table public.internal_service_nonces enable row level security;
  * constraint is the arbiter and `on conflict do nothing` makes losing an ordinary outcome rather
  * than an error.
  *
- * `p_ttl_seconds` controls how long the claim is remembered. It defaults to 120 seconds — twice the
+ * The retention window is **hard-coded**. It is not a parameter, because a parameter would let
+ * whoever can call this function decide how long a nonce stays burned — and the one thing a replay
+ * guard must never offer its caller is control over its own lifetime. 120 seconds is twice the
  * request timestamp window, which is exactly as long as a nonce needs to be remembered: after that
  * the request would be rejected as stale anyway.
  *
@@ -67,8 +105,7 @@ alter table public.internal_service_nonces enable row level security;
  */
 create or replace function public.internal_claim_service_nonce(
   p_key_id text,
-  p_nonce text,
-  p_ttl_seconds integer default 120
+  p_nonce text
 )
 returns boolean
 language plpgsql
@@ -76,6 +113,8 @@ security definer
 set search_path = ''
 as $$
 declare
+  -- How long a claimed nonce stays on record. Not caller-controllable: see the comment above.
+  k_retention_seconds constant integer := 120;
   v_inserted uuid;
 begin
   if p_key_id is null or pg_catalog.btrim(p_key_id) = '' then
@@ -89,7 +128,7 @@ begin
   values (
     pg_catalog.btrim(p_key_id),
     p_nonce,
-    pg_catalog.now() + (greatest(coalesce(p_ttl_seconds, 120), 1) * interval '1 second')
+    pg_catalog.now() + (k_retention_seconds * interval '1 second')
   )
   on conflict (key_id, nonce) do nothing
   returning id
@@ -112,7 +151,8 @@ $$;
  * ledger only ever needs to hold two minutes' worth of nonces, falling behind is not a correctness
  * problem — it is just a few wasted rows.
  *
- * `p_max_rows` is clamped to [1, 50000] so a caller cannot ask for an unbounded scan.
+ * `p_max_rows` is clamped to [1, 1000]. It is a housekeeping knob on an internal-only function, not
+ * a security boundary, but clamping keeps a caller from asking for a scan large enough to matter.
  */
 create or replace function public.internal_purge_expired_service_nonces(
   p_max_rows integer default 1000
@@ -126,7 +166,7 @@ declare
   v_deleted integer;
   v_limit integer;
 begin
-  v_limit := greatest(least(coalesce(p_max_rows, 1000), 50000), 1);
+  v_limit := greatest(least(coalesce(p_max_rows, 1000), 1000), 1);
 
   -- Selecting the doomed ids in a subquery (rather than `delete ... using`) keeps the row limit
   -- unambiguous: the LIMIT applies to the scan, and `row_count` then reports exactly what was
@@ -146,21 +186,50 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Privileges
+-- Privileges: internal-only. Read the block comment at the top of this file.
 -- ---------------------------------------------------------------------------
 
-grant execute on function public.internal_claim_service_nonce(text, text, integer)
-  to anon, authenticated;
-grant execute on function public.internal_purge_expired_service_nonces(integer)
-  to anon, authenticated;
+-- 1. Strip the implicit PUBLIC grant that every `create function` carries. Without this, anyone
+--    holding the anon key could call both functions.
+revoke all on function public.internal_claim_service_nonce(text, text) from public;
+revoke all on function public.internal_purge_expired_service_nonces(integer) from public;
 
--- The Recording API connects as the database owner and needs no grant; service_role is covered for
--- deployments that route server work through it.
+-- 2. Revoke the Supabase client roles explicitly, and do not grant them back. Revoking rather than
+--    merely omitting a grant means a later `alter default privileges`, or a well-meaning follow-up
+--    migration, cannot silently reopen this surface.
+--
+--    These roles are created by Supabase and by the local auth bootstrap, so revoke them
+--    unconditionally — the statements are no-ops if the role has no grant. (`service_role` is a
+--    server credential, but it is still a Supabase *client* role and has no use for an internal
+--    primitive.)
+do $$
+declare
+  v_role text;
+begin
+  foreach v_role in array array['anon', 'authenticated', 'service_role'] loop
+    if exists (select 1 from pg_catalog.pg_roles where rolname = v_role) then
+      execute format(
+        'revoke all on function public.internal_claim_service_nonce(text, text) from %I',
+        v_role
+      );
+      execute format(
+        'revoke all on function public.internal_purge_expired_service_nonces(integer) from %I',
+        v_role
+      );
+    end if;
+  end loop;
+end;
+$$;
+
+-- 3. The one role that *is* allowed: a dedicated private server role, for operators who would
+--    rather not connect as the database owner. Granted conditionally so this migration applies
+--    cleanly whether or not that role has been created. The shipped deployment connects as owner
+--    and needs no grant at all.
 do $$
 begin
-  if exists (select 1 from pg_catalog.pg_roles where rolname = 'service_role') then
-    execute 'grant execute on function public.internal_claim_service_nonce(text, text, integer) to service_role';
-    execute 'grant execute on function public.internal_purge_expired_service_nonces(integer) to service_role';
+  if exists (select 1 from pg_catalog.pg_roles where rolname = 'suhbat_recording_api') then
+    execute 'grant execute on function public.internal_claim_service_nonce(text, text) to suhbat_recording_api';
+    execute 'grant execute on function public.internal_purge_expired_service_nonces(integer) to suhbat_recording_api';
   end if;
 end;
 $$;

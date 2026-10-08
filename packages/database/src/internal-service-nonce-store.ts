@@ -2,6 +2,15 @@ import type { SqlExecutor } from './phase4-backbone.ts';
 import { createNonceStore, type DurableNonceStore } from './internal-service-auth.ts';
 
 /**
+ * How long a claimed nonce stays on record, in seconds.
+ *
+ * Mirrors `k_retention_seconds` in `internal_claim_service_nonce`. It is fixed in SQL, not passed
+ * in, so nothing downstream can extend or shorten the window; this constant exists only so the
+ * documentation in one place can point at the other.
+ */
+export const SERVICE_NONCE_RETENTION_SECONDS = 120;
+
+/**
  * Durable, cross-machine replay protection for Web → Recording API requests.
  *
  * ## Why this exists
@@ -35,13 +44,12 @@ export type PostgresNonceStoreOptions = {
   /** The privileged executor the Recording API writes through. */
   db: SqlExecutor;
   /**
-   * How long a claimed nonce stays on record.
+   * How many successful claims between opportunistic cleanups.
    *
-   * Twice the request timestamp window: a nonce must stay burned for as long as its request could
-   * still arrive and be considered fresh.
+   * Note there is deliberately no TTL option: retention is fixed inside
+   * `internal_claim_service_nonce`. A replay guard that lets its caller choose how long a nonce
+   * stays burned is not a replay guard.
    */
-  ttlMs?: number;
-  /** How many successful claims between opportunistic cleanups. */
   purgeEveryClaims?: number;
   /** Hard ceiling on rows removed per cleanup, so a purge can never hold a lock for long. */
   purgeMaxRows?: number;
@@ -54,7 +62,6 @@ export function createPostgresNonceStore(
   options: PostgresNonceStoreOptions,
 ): DurableNonceStore {
   const db = options.db;
-  const ttlMs = options.ttlMs ?? 120_000;
   const purgeEveryClaims = Math.max(1, options.purgeEveryClaims ?? 100);
   const purgeMaxRows = Math.max(1, options.purgeMaxRows ?? 1_000);
   const now = options.now ?? (() => Date.now());
@@ -77,9 +84,10 @@ export function createPostgresNonceStore(
     async consume(nonce: string, keyId = 'primary'): Promise<boolean> {
       if (!nonce) return false;
       try {
+        // No TTL argument: retention is fixed inside the function.
         const result = await db.query<{ claimed: boolean }>(
-          `select public.internal_claim_service_nonce($1, $2, $3) as claimed`,
-          [keyId, nonce, Math.max(1, Math.round(ttlMs / 1000))],
+          `select public.internal_claim_service_nonce($1, $2) as claimed`,
+          [keyId, nonce],
         );
         // A NULL or missing row means the ledger did not answer; treat that as "already used".
         const claimed = result.rows[0]?.claimed === true;

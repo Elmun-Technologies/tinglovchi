@@ -1103,6 +1103,150 @@ describe('6b. durable replay protection across Recording API machines', () => {
 });
 
 // ===========================================================================
+// 6c. The replay primitives are NOT public Supabase RPCs
+// ===========================================================================
+
+describe('6c. replay-protection SQL functions are internal-only', () => {
+  /**
+   * Runs `callback` as a Supabase client role.
+   *
+   * `usage on schema public` is granted first so that a failure is unambiguously about the
+   * function's own privilege and not about the role being unable to resolve the schema at all.
+   */
+  async function asClientRole<T>(role: 'anon' | 'authenticated', callback: () => Promise<T>): Promise<T> {
+    await db.exec('reset role');
+    await db.exec(`grant usage on schema public to ${role}`);
+    await db.exec(`set role ${role}`);
+    try {
+      return await callback();
+    } finally {
+      await db.exec('reset role');
+    }
+  }
+
+  const claimSignature = 'public.internal_claim_service_nonce(text, text)';
+  const purgeSignature = 'public.internal_purge_expired_service_nonces(integer)';
+
+  it('anon cannot execute internal_claim_service_nonce', async () => {
+    await asClientRole('anon', async () => {
+      await expect(
+        db.query('select public.internal_claim_service_nonce($1, $2)', ['primary', 'anon-nonce-1']),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
+
+  it('authenticated cannot execute internal_claim_service_nonce', async () => {
+    await asClientRole('authenticated', async () => {
+      await expect(
+        db.query('select public.internal_claim_service_nonce($1, $2)', ['primary', 'auth-nonce-1']),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
+
+  it('anon cannot execute internal_purge_expired_service_nonces', async () => {
+    await asClientRole('anon', async () => {
+      await expect(
+        db.query('select public.internal_purge_expired_service_nonces($1)', [10]),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
+
+  it('authenticated cannot execute internal_purge_expired_service_nonces', async () => {
+    await asClientRole('authenticated', async () => {
+      await expect(
+        db.query('select public.internal_purge_expired_service_nonces($1)', [10]),
+      ).rejects.toThrow(/permission denied/i);
+    });
+  });
+
+  it('no client role holds EXECUTE on either function, and PUBLIC holds none either', async () => {
+    // has_function_privilege is independent of schema usage and of whether the role can connect, so
+    // it is the direct statement of the property: these grants simply do not exist.
+    // Only roles that actually exist in this database — `service_role` is created by hosted
+    // Supabase and by the local stack, not by the migrations.
+    const result = await db.query<{ role: string; claim: boolean; purge: boolean }>(
+      `select r.rolname as role,
+              pg_catalog.has_function_privilege(r.rolname, $1, 'execute') as claim,
+              pg_catalog.has_function_privilege(r.rolname, $2, 'execute') as purge
+         from pg_catalog.pg_roles as r
+        where r.rolname in ('anon', 'authenticated', 'service_role')`,
+      [claimSignature, purgeSignature],
+    );
+    // The bootstrap creates anon and authenticated, so this is a real check, not a vacuous one.
+    expect(result.rows.map((row) => row.role).sort()).toEqual(['anon', 'authenticated']);
+    for (const row of result.rows) {
+      expect(row.claim, `${row.role} must not hold EXECUTE on the claim function`).toBe(false);
+      expect(row.purge, `${row.role} must not hold EXECUTE on the purge function`).toBe(false);
+    }
+
+    // PUBLIC is a pseudo-role and cannot be passed to has_function_privilege, so read the ACL
+    // directly. An entry with an empty grantee (`=X/owner`) is a grant to PUBLIC.
+    for (const name of ['internal_claim_service_nonce', 'internal_purge_expired_service_nonces']) {
+      const aclResult = await db.query<{ acl: string | null }>(
+        `select pg_catalog.array_to_json(proacl)::text as acl
+           from pg_proc
+          where proname = $1`,
+        [name],
+      );
+      const acl = aclResult.rows[0]?.acl ?? null;
+      if (acl === null) continue; // No ACL at all means no grants were ever issued. Fine.
+      const entries = acl.replace(/^\["|"\]$/g, '').split('","');
+      for (const entry of entries) {
+        const grantee = entry.slice(0, entry.indexOf('='));
+        expect(grantee, `${name} must not carry a PUBLIC grant (got "${entry}")`).not.toBe('');
+      }
+    }
+  });
+
+  it('the revocation is explicit, not merely an omitted grant', () => {
+    // Reading the migration, rather than the database, because what matters is that a future
+    // `alter default privileges` or follow-up migration cannot silently reintroduce the grant.
+    const migration = readFileSync(
+      resolve('supabase/migrations/202610080003_internal_service_nonce.sql'),
+      'utf8',
+    );
+    for (const signature of [claimSignature, purgeSignature]) {
+      expect(migration, `PUBLIC must be revoked from ${signature}`).toMatch(
+        new RegExp(`revoke all on function ${signature.replace(/[.()]/g, '\\$&')} from public`),
+      );
+    }
+    expect(migration).toMatch(/foreach v_role in array array\['anon', 'authenticated', 'service_role'\]/);
+    // And the grants that must never be written back.
+    expect(migration).not.toMatch(/grant execute[\s\S]{0,200}to anon/);
+    expect(migration).not.toMatch(/grant execute[\s\S]{0,200}to authenticated/);
+  });
+
+  it('the Recording API still claims nonces through its privileged connection', async () => {
+    // The owner connection needs no grant — that is the whole point of revoking the client roles.
+    // This is the counterweight to the four denial tests: proving the lock did not lock out the
+    // legitimate caller.
+    const store = createPostgresNonceStore({ db });
+    const nonce = `owner-nonce-${randomHex(8)}`;
+    expect(await store.consume(nonce, 'primary')).toBe(true);
+    expect(await store.consume(nonce, 'primary')).toBe(false);
+  });
+
+  it('the nonce retention window is fixed in SQL, not caller-controllable', async () => {
+    // The two-argument signature is itself the guarantee: there is no parameter to abuse.
+    const signature = await db.query<{ args: number }>(
+      `select pg_catalog.pg_get_function_arguments(oid) as args_text,
+              pg_catalog.pg_get_function_arguments(oid) as args
+         from pg_proc where proname = 'internal_claim_service_nonce'`,
+    );
+    const declared = await db.query<{ argument_count: number; signature: string }>(
+      `select pronargs as argument_count,
+              pg_catalog.pg_get_function_arguments(oid) as signature
+         from pg_proc
+        where proname = 'internal_claim_service_nonce'`,
+    );
+    expect(declared.rows).toHaveLength(1);
+    expect(declared.rows[0]!.argument_count).toBe(2);
+    expect(declared.rows[0]!.signature.toLowerCase()).not.toMatch(/ttl|retention|second/);
+    void signature;
+  });
+});
+
+// ===========================================================================
 // 7-8. No AssemblyAI or OpenAI in the recording path
 // ===========================================================================
 
