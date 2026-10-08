@@ -27,13 +27,7 @@ import {
   isCapturing as isFlowCapturing,
   reduceFlow,
 } from './flow.ts';
-import {
-  type Action,
-  controlsFor,
-  initialState,
-  noticeFromError,
-  reduce,
-} from './state.ts';
+import { controlsFor, initialState, noticeFromError, reduce } from './state.ts';
 import {
   accessTokenNeedsRefresh,
   createSessionStore,
@@ -84,7 +78,6 @@ export function App() {
   const [authPhase, setAuthPhase] = useState<'idle' | 'waiting'>('idle');
   const [deviceUid, setDeviceUid] = useState<string | null>(null);
   const [captureSystemAudio, setCaptureSystemAudio] = useState(true);
-  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
   const [recoveredSessionId, setRecoveredSessionId] = useState<string | null>(null);
 
   const sessionRef = useRef(session);
@@ -223,7 +216,7 @@ export function App() {
   const fail = useCallback((error: unknown, fallback: FlowNotice) => {
     const recorderError = toRecorderError(error);
     if (error instanceof BridgeUnavailableError) {
-      dispatch({ type: 'notice', notice: { tone: 'error', title: 'Recorder is unavailable', detail: error.message } });
+      dispatch({ type: 'notice', notice: { tone: 'error', title: copy.errors.recorderUnavailable } });
       return;
     }
     if (error instanceof CloudError) {
@@ -382,16 +375,6 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, dispatch]);
 
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine);
-    window.addEventListener('online', update);
-    window.addEventListener('offline', update);
-    return () => {
-      window.removeEventListener('online', update);
-      window.removeEventListener('offline', update);
-    };
-  }, []);
-
   /* ------------------------------------------------------ upload pumping */
 
   useEffect(() => {
@@ -453,11 +436,7 @@ export function App() {
         const state = await cloud.getMeetingProcessing(meeting.meetingId, meeting.workspaceId);
         if (cancelled) return;
         const error = state.timeline.error
-          ? {
-              tone: 'warn' as const,
-              title: copy.errors.pipelineFailed,
-              detail: state.timeline.error.hint ?? state.timeline.error.message,
-            }
+          ? { tone: 'warn' as const, title: copy.errors.pipelineFailed }
           : null;
         dispatch({
           type: 'processing',
@@ -760,7 +739,6 @@ export function App() {
 
   /* --------------------------------------------------------------- render */
 
-  const deviceLabel = deviceSummary(panel.permissions, panel.status?.sources.length ?? 0);
   const settingDevices = panel.devices;
 
   return (
@@ -831,9 +809,6 @@ export function App() {
       {flow.phase === 'idle' ? (
         <IdleView
           workspace={workspace}
-          workspaceCount={session.workspaces.length}
-          deviceReady={Boolean(panel.permissions?.microphone === 'permission_granted') && !controls.blockedReason}
-          deviceLabel={deviceLabel}
           canStart={
             Boolean(apiBase) &&
             bridge.kind !== 'unavailable' &&
@@ -841,36 +816,26 @@ export function App() {
             !micDenied &&
             !controls.blockedReason
           }
-          starting={false}
           onStart={() => void start()}
           onOpenSettings={() => setSettingsOpen(true)}
-          onSwitchWorkspace={() => setSettingsOpen(true)}
         />
       ) : null}
 
-      {flow.phase === 'recording' || flow.phase === 'paused' || flow.phase === 'starting' || flow.phase === 'stopping' ? (
+      {flow.phase === 'recording' || flow.phase === 'paused' || flow.phase === 'starting' ? (
         <RecordingView
           status={panel.status}
           paused={flow.phase === 'paused'}
           canPause={flow.phase === 'recording'}
           canResume={flow.phase === 'paused'}
           canStop={flow.phase === 'recording' || flow.phase === 'paused'}
-          stopping={flow.phase === 'stopping'}
           onPause={() => void run('pause', () => bridge.pause(), (status) => send({ type: 'status', status }))}
           onResume={() => void run('resume', () => bridge.resume(), (status) => send({ type: 'status', status }))}
           onStop={() => void stop()}
         />
       ) : null}
 
-      {flow.phase === 'uploading' || flow.phase === 'saved_locally' || flow.phase === 'processing' ? (
-        <ProcessingView
-          phase={flow.phase}
-          productState={flow.processing?.productState ?? null}
-          steps={flow.processing?.steps ?? []}
-          progress={flow.upload}
-          offline={!online || flow.phase === 'saved_locally'}
-          onOpenResult={openResult}
-        />
+      {flow.phase === 'stopping' || flow.phase === 'uploading' || flow.phase === 'saved_locally' || flow.phase === 'processing' ? (
+        <ProcessingView phase={flow.phase} productState={flow.processing?.productState ?? null} />
       ) : null}
 
       {flow.phase === 'analysis_failed' ? (
@@ -889,7 +854,6 @@ export function App() {
         <ReadyView
           title={flow.meeting?.title ?? copy.tagline}
           durationMs={flow.processing?.durationMs ?? null}
-          languages={flow.processing?.languages ?? []}
           onOpenResult={openResult}
           onNewMeeting={() => {
             meetingRef.current = null;
@@ -928,7 +892,7 @@ export function App() {
 
   /** Wraps a bridge call so a failure becomes a visible notice instead of a silent rejection. */
   function run<T>(
-    label: string,
+    _label: string,
     work: () => Promise<T>,
     onResult?: (value: T) => void,
   ): Promise<void> {
@@ -938,7 +902,7 @@ export function App() {
         onResult?.(value);
       })
       .catch((error: unknown) => {
-        fail(error, { tone: 'error', title: copy.errors.generic, detail: `${label} failed` });
+        fail(error, { tone: 'error', title: copy.errors.generic });
       });
   }
 }
@@ -962,19 +926,6 @@ function isCapturingState(state: string): boolean {
   return state === 'recording' || state === 'paused' || state === 'finalizing';
 }
 
-function deviceSummary(
-  permissions: { microphone: string; systemAudio: string } | null,
-  sourceCount: number,
-): string {
-  if (!permissions) return copy.idle.deviceChecking;
-  if (permissions.microphone === 'permission_denied') return copy.errors.microphoneDenied;
-  if (permissions.microphone !== 'permission_granted') return copy.idle.deviceChecking;
-  if (permissions.systemAudio === 'device_unavailable' || sourceCount < 2) {
-    return copy.errors.systemAudioUnavailable;
-  }
-  return copy.idle.deviceReady;
-}
-
 function startFailureNotice(cause: unknown): FlowNotice {
   const error = toRecorderError(cause);
   switch (error.code) {
@@ -988,10 +939,10 @@ function startFailureNotice(cause: unknown): FlowNotice {
       };
     case 'disk_space_insufficient':
     case 'disk_full':
-      return { tone: 'error', title: copy.errors.diskFull, detail: error.message };
+      return { tone: 'error', title: copy.errors.diskFull };
     case 'device_unavailable':
     case 'device_lost':
-      return { tone: 'error', title: copy.errors.deviceLost, detail: error.message };
+      return { tone: 'error', title: copy.errors.deviceLost };
     default:
       return noticeFromError(error);
   }
@@ -1008,7 +959,7 @@ function cloudNotice(error: CloudError): FlowNotice {
     case 'not_configured':
       return { tone: 'error', title: copy.errors.notConfigured };
     default:
-      return { tone: 'warn', title: copy.errors.pipelineFailed, detail: error.message };
+      return { tone: 'warn', title: copy.errors.generic };
   }
 }
 

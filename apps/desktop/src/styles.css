@@ -150,10 +150,10 @@ button:disabled {
 }
 
 .stage-brand {
+  grid-row: 1;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
   align-items: center;
+  justify-content: center;
 }
 
 .wordmark {
@@ -164,17 +164,14 @@ button:disabled {
 }
 
 .wordmark-sub {
-  font-size: 10.5px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
   color: var(--muted-dim);
-}
-
-.stage-brand-quiet {
-  align-items: center;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .stage-centre {
+  grid-row: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -185,6 +182,7 @@ button:disabled {
 }
 
 .stage-footer {
+  grid-row: 3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -196,11 +194,27 @@ button:disabled {
   gap: 10px;
 }
 
+.idle-centre {
+  gap: 16px;
+}
+
+.recording-centre {
+  gap: 20px;
+}
+
+.processing-centre {
+  gap: 18px;
+}
+
+.ready-centre {
+  gap: 13px;
+}
+
 /* --------------------------------------------------------------- mic button */
 
 .mic-button {
-  width: 132px;
-  height: 132px;
+  width: 184px;
+  height: 184px;
   border-radius: 50%;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, #1c2129 0%, #12161c 100%);
@@ -247,10 +261,29 @@ button:disabled {
 
 .mic-label {
   margin: 0;
+  font-size: 18px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.idle-hint {
+  margin: -8px 0 0;
   font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
   color: var(--muted);
+}
+
+.idle-footer {
+  justify-content: space-between;
+}
+
+.workspace-caption {
+  max-width: min(260px, calc(100% - 40px));
+  overflow: hidden;
+  color: var(--muted-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes pulse {
@@ -267,44 +300,7 @@ button:disabled {
   }
 }
 
-/* ------------------------------------------------------- workspace / device */
-
-.workspace-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--bg-raised);
-  color: var(--muted);
-  font-size: 12px;
-  max-width: 260px;
-}
-
-.workspace-chip:hover:not(:disabled) {
-  color: var(--text);
-  border-color: #303845;
-}
-
-.workspace-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--muted-dim);
-}
-
-.workspace-dot[data-ready='true'] {
-  background: var(--accent);
-}
-
-.workspace-count {
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--line-soft);
-  font-size: 10.5px;
-  color: var(--muted);
-}
+/* --------------------------------------------------------------- secondary */
 
 .device-line {
   font-size: 11.5px;
@@ -334,44 +330,34 @@ button:disabled {
 
 /* --------------------------------------------------------------- recording */
 
-.rec-badge {
+.recording-status {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--rec-soft);
-  color: #ff9d99;
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  gap: 10px;
+  color: #ff9893;
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
 }
 
-.rec-badge[data-paused='true'] {
-  background: rgb(224 163 46 / 14%);
-  color: #f0c069;
+.recording-status[data-paused='true'] {
+  color: var(--muted);
+  letter-spacing: 0.12em;
 }
 
-.rec-badge.is-working {
-  background: var(--accent-soft);
-  color: #7fded2;
-}
-
-.rec-dot {
-  width: 7px;
-  height: 7px;
+.recording-dot {
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: var(--rec);
+  box-shadow: 0 0 0 7px var(--rec-soft);
   animation: breathe 1.6s ease-in-out infinite;
 }
 
-.rec-badge[data-paused='true'] .rec-dot {
+.recording-status[data-paused='true'] .recording-dot {
   background: var(--warn);
+  box-shadow: 0 0 0 7px rgb(224 163 46 / 12%);
   animation: none;
-}
-
-.rec-badge.is-working .rec-dot {
-  background: var(--accent);
 }
 
 @keyframes breathe {
@@ -385,7 +371,7 @@ button:disabled {
 }
 
 .timer {
-  font-size: 62px;
+  font-size: 82px;
   font-weight: 250;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
@@ -397,13 +383,6 @@ button:disabled {
   color: var(--muted);
 }
 
-.timer-hint {
-  margin: -6px 0 0;
-  font-size: 11.5px;
-  color: var(--muted-dim);
-  max-width: 380px;
-}
-
 /* ---------------------------------------------------------------- waveform */
 
 .waveform {
@@ -411,14 +390,15 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  height: 54px;
-  width: min(420px, 90%);
+  height: 46px;
+  width: min(300px, 84%);
+  opacity: 0.84;
 }
 
 .waveform-bar {
   flex: 1;
   min-width: 2px;
-  max-width: 6px;
+  max-width: 4px;
   border-radius: 999px;
   background: rgb(255 255 255 / 12%);
   transition: height 90ms linear;
@@ -445,7 +425,7 @@ button:disabled {
 
 .source-pills {
   display: flex;
-  gap: 8px;
+  gap: 18px;
   flex-wrap: wrap;
   justify-content: center;
 }
@@ -453,54 +433,26 @@ button:disabled {
 .source-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--bg-raised);
-  font-size: 11.5px;
-  color: var(--muted);
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted-dim);
 }
 
-.source-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--muted-dim);
+.source-mark {
+  color: var(--muted-dim);
+  font-size: 12px;
 }
 
-.source-pill[data-state='active'] .source-dot {
-  background: var(--accent);
+.source-pill[data-state='active'] .source-mark {
+  color: var(--accent);
 }
 
-.source-pill[data-state='silent'] .source-dot {
-  background: var(--warn);
+.source-pill[data-state='silent'] .source-mark {
+  color: var(--warn);
 }
 
-.source-pill[data-state='unavailable'] .source-dot {
-  background: var(--rec);
-}
-
-.meters {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  gap: 1px;
-  height: 2px;
-  opacity: 0.7;
-}
-
-.meter {
-  flex: 1;
-  background: var(--line-soft);
-}
-
-.meter-fill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 120ms linear;
+.source-pill[data-state='unavailable'] .source-mark {
+  color: var(--rec);
 }
 
 /* ----------------------------------------------------------------- buttons */
@@ -585,60 +537,6 @@ button:disabled {
   max-width: 380px;
 }
 
-.step-list {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  text-align: left;
-  min-width: 260px;
-}
-
-.step-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12.5px;
-  color: var(--muted-dim);
-}
-
-.step-marker {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1.5px solid var(--line);
-  flex-shrink: 0;
-}
-
-.step-list li[data-state='done'] {
-  color: var(--muted);
-}
-
-.step-list li[data-state='done'] .step-marker {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.step-list li[data-state='active'] {
-  color: var(--text);
-}
-
-.step-list li[data-state='active'] .step-marker {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.step-list li[data-state='failed'] {
-  color: #ff8a85;
-}
-
-.step-list li[data-state='failed'] .step-marker {
-  background: var(--rec);
-  border-color: var(--rec);
-}
-
 /* -------------------------------------------------------------------- ready */
 
 .ready-glyph {
@@ -669,28 +567,23 @@ button:disabled {
   max-width: 420px;
 }
 
-.ready-meta {
-  display: flex;
-  gap: 34px;
-  margin: 6px 0 0;
-}
-
-.ready-meta div {
+.ready-duration {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  margin: 4px 0 0;
 }
 
-.ready-meta dt {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
+.ready-duration span {
   color: var(--muted-dim);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-.ready-meta dd {
-  margin: 0;
-  font-size: 15px;
+.ready-duration strong {
+  font-size: 16px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
@@ -850,7 +743,7 @@ button:disabled {
 /* Respect reduced-motion: the recording indicator still changes colour, it just stops animating. */
 @media (prefers-reduced-motion: reduce) {
   .spinner,
-  .rec-dot,
+  .recording-dot,
   .waveform-bar,
   .mic-button.is-starting {
     animation: none;

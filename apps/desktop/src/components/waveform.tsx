@@ -23,7 +23,11 @@ export function Waveform({
   const rms = live ? (level?.rms ?? 0) : 0;
 
   return (
-    <div className={`waveform ${live ? 'is-live' : 'is-silent'}`} data-tone={tone} aria-hidden="true">
+    <div
+      className={`waveform ${live ? 'is-live' : 'is-silent'}`}
+      data-tone={tone}
+      aria-hidden="true"
+    >
       {Array.from({ length: bars }, (_, index) => {
         const centre = Math.abs(index - (bars - 1) / 2) / ((bars - 1) / 2);
         const shape = 1 - centre * centre * 0.75;
@@ -40,7 +44,7 @@ export function Waveform({
   );
 }
 
-/** Compact "is this source capturing" pill used in the recording header. */
+/** Subtle source confirmation under the live waveform. */
 export function SourcePill({
   label,
   state,
@@ -48,12 +52,13 @@ export function SourcePill({
   label: string;
   state: 'active' | 'silent' | 'unavailable';
 }) {
-  const text =
-    state === 'active' ? label : state === 'silent' ? `${label} — jim` : `${label} — yo‘q`;
+  const stateLabel = state === 'active' ? 'yozilyapti' : state === 'silent' ? 'jim' : 'mavjud emas';
   return (
-    <span className="source-pill" data-state={state}>
-      <span className="source-dot" />
-      {text}
+    <span className="source-pill" data-state={state} aria-label={`${label}: ${stateLabel}`}>
+      <span>{label}</span>
+      <span className="source-mark" aria-hidden="true">
+        {state === 'active' ? '✓' : state === 'silent' ? '·' : '—'}
+      </span>
     </span>
   );
 }

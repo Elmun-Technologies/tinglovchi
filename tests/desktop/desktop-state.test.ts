@@ -6,6 +6,7 @@ import {
   type SourceStatus,
   recorderStatusSchema,
 } from '@suhbat/contracts';
+import { copy } from '../../apps/desktop/src/copy.ts';
 import {
   MAX_RECENT_CHUNKS,
   controlsFor,
@@ -186,7 +187,7 @@ describe('controls follow the state machine', () => {
       state({ status: status({ state: 'permission_blocked', sources: [], levels: [] }) }),
     );
     expect(blocked.canStart).toBe(false);
-    expect(blocked.blockedReason).toContain('System Settings');
+    expect(blocked.blockedReason).toBe(copy.errors.microphoneDeniedDetail);
   });
 
   it('disables healthy-session controls the moment persistence fails', () => {
@@ -203,15 +204,16 @@ describe('controls follow the state machine', () => {
     });
     const controls = controlsFor(faulted);
     expect(controls).toMatchObject({ canPause: false, canResume: false, canAnnotate: false });
-    expect(controls.blockedReason).toContain('Persistence failed');
+    expect(controls.blockedReason).toBe(copy.errors.persistenceFailed);
   });
 
-  it('shows a plain refusal when the native bridge is missing', () => {
+  it('shows a plain, non-technical message when the native bridge is missing', () => {
     const next = reduce(initialState, { type: 'bridge', kind: 'unavailable' });
-    expect(next.notice?.tone).toBe('warn');
-    expect(next.notice?.title).toBe('Native recorder bridge unavailable');
+    expect(next.notice?.tone).toBe('info');
+    expect(next.notice?.title).toBe(copy.errors.recorderUnavailable);
+    expect(next.notice?.title).not.toMatch(/bridge|npm run|debug/i);
     expect(controlsFor(next).canStart).toBe(false);
-    expect(controlsFor(next).blockedReason).toContain('native bridge');
+    expect(controlsFor(next).blockedReason).toBe(copy.errors.recorderUnavailable);
     expect(reduce(next, { type: 'bridge', kind: 'tauri' }).notice).toBeNull();
   });
 });
@@ -410,7 +412,9 @@ describe('event folding', () => {
       },
     });
     expect(withFault.notice?.tone).toBe('error');
-    expect(withFault.notice?.detail).toContain('no space left on device');
+    expect(withFault.notice?.title).toBe('Audio saqlashda muammo');
+    expect(withFault.notice?.detail).not.toContain('no space left on device');
+    expect(withFault.notice?.title).not.toContain('disk_full');
     const stillBroken = reduce(withFault, {
       type: 'status',
       status: status({
@@ -439,6 +443,7 @@ describe('event folding', () => {
       },
     });
     expect(errored.busy).toBe(false);
-    expect(errored.notice?.title).toContain('permission_denied');
+    expect(errored.notice?.title).toBe(copy.errors.generic);
+    expect(JSON.stringify(errored.notice)).not.toContain('permission_denied');
   });
 });

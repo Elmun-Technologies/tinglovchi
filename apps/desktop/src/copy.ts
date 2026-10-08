@@ -14,11 +14,7 @@ export const copy = {
 
   idle: {
     start: 'Suhbatni boshlash',
-    starting: 'Boshlanmoqda…',
-    noWorkspace: 'Ish maydoni tanlanmagan',
-    switchWorkspace: 'Ish maydonini almashtirish',
-    deviceReady: 'Mikrofon va tizim ovozi tayyor',
-    deviceChecking: 'Qurilmalar tekshirilmoqda…',
+    hint: 'Yozishni boshlash uchun mikrofonni bosing',
     settings: 'Sozlamalar',
   },
 
@@ -28,35 +24,24 @@ export const copy = {
     resume: 'Davom ettirish',
     stop: 'To‘xtatish',
     stopping: 'To‘xtatilmoqda…',
-    mic: 'Mikrofon',
-    system: 'Tizim ovozi',
-    micOn: 'Mikrofon yozilmoqda',
-    micOff: 'Mikrofon ovozi eshitilmayapti',
-    systemOn: 'Tizim ovozi yozilmoqda',
-    systemOff: 'Tizim ovozi yozilmayapti',
+    mic: 'Microfon',
+    system: 'System audio',
   },
 
   paused: {
-    title: 'Pauza',
-    hint: 'Vaqt to‘xtamadi — suhbat davomiyligi hisoblanishda davom etadi.',
+    title: 'PAUSED',
   },
 
   after: {
-    saving: 'Audio saqlanmoqda',
-    uploading: 'Yuklanmoqda',
-    offlineSaved: 'Internet yo‘q. Suhbat qurilmada xavfsiz saqlandi.',
-    savedLocally: 'Suhbat qurilmada xavfsiz saqlandi',
-    transcribing: 'Transkripsiya qilinmoqda',
-    analyzing: 'Tahlil qilinmoqda',
-    uploadResume: 'Yuklash davom ettiriladi',
+    saving: 'Audio saqlanmoqda…',
+    uploading: 'Yuklanmoqda…',
+    transcribing: 'Transkripsiya qilinmoqda…',
+    analyzing: 'Tahlil qilinmoqda…',
     ready: 'Suhbat tayyor',
     viewResult: 'Natijani ko‘rish',
     newMeeting: 'Yangi suhbat',
     failed: 'Suhbat saqlandi. Tahlil vaqtincha bajarilmadi.',
-    retry: 'Qayta urinish',
     duration: 'Davomiylik',
-    languages: 'Tillar',
-    languagesUnknown: 'Til aniqlanmadi',
   },
 
   errors: {
@@ -71,14 +56,15 @@ export const copy = {
     pipelineFailed: 'Suhbat saqlandi. Tahlil vaqtincha bajarilmadi.',
     deviceLost: 'Mikrofon uzilib qoldi',
     diskFull: 'Diskda joy yetarli emas',
-    persistenceFailed: 'Yozuv saqlanmadi',
+    persistenceFailed: 'Audio saqlashda muammo',
+    recorderUnavailable: 'Yozish uchun SUHBAT Recorder ilovasini oching.',
     sessionExpired: 'Sessiya muddati tugagan. Iltimos, qayta kiring.',
     reauth: 'Qayta kirish',
     reauthDetail:
       'Sessiya yangilanmadi. Suhbat qurilmada saqlangan va yuklash davom etadi — faqat qayta kiring.',
     notConfigured:
-      'SUHBAT server manzili sozlanmagan. Ilovani qayta o‘rnating yoki VITE_SUHBAT_API_BASE_URL ni tekshiring.',
-    generic: 'Nimadir xato ketdi. Suhbat qurilmada saqlangan.',
+      'SUHBAT xizmatiga ulanish sozlanmagan. Yordam uchun administratorga murojaat qiling.',
+    generic: 'Nimadir xato ketdi. Iltimos, qayta urinib ko‘ring.',
   },
 
   auth: {

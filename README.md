@@ -2,6 +2,21 @@
 
 **SUHBAT AI** (`suhbat-ai`) is a company meeting-memory platform: it organizes conversations by workspace, company, and project, then evolves them into evidence-linked organizational knowledge. The product name is configurable through `NEXT_PUBLIC_APP_NAME`; it is not a domain identifier.
 
+## Two products, separate entry points
+
+- **SUHBAT Recorder** (`apps/desktop`) is the focused desktop dictaphone: start, pause, stop, and hand off a finished conversation. It does not open the web dashboard.
+- **SUHBAT Intelligence** (`apps/web`) is the existing web dashboard and advanced results/admin product. It remains intact and is started separately.
+
+Run commands from the repository root:
+
+| Command                                            | Opens                                                                                                                                         |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`                                      | **Web Dashboard** — Next.js in the browser on port 3000.                                                                                      |
+| `npm run dev --workspace @suhbat/desktop`          | **Recorder renderer preview** — Vite in a browser on port 1420; not the native app and cannot capture audio.                                  |
+| `npm run tauri --workspace @suhbat/desktop -- dev` | **Real Desktop Recorder** — the native Tauri window with recorder access. Requires the desktop toolchain and a supported Mac/Windows machine. |
+
+Use the third command to run the actual desktop product. Do not use the root `npm run dev` command to launch the recorder; it intentionally starts the Web Dashboard.
+
 ## Current status — Phase 1 foundation
 
 Implemented in this phase:
@@ -195,8 +210,9 @@ Implemented in Phase 10:
   `send_telegram_notifications`, and `execute_automation_action`) plus `object_deletion_ledger` storage
   reconciliation (`reconcilePendingDeletions`, `drainQueue`, `runPollingLoop`).
 
-Open a workspace by pointing a browser at `/w/ws_suhbat_demo` after `npm run dev`. A link to the same demo
-workspace is also offered on the setup screen when Supabase is not configured.
+To view the **Web Dashboard** demo, point a browser at `/w/ws_suhbat_demo` after `npm run dev`. A link to the
+same demo workspace is also offered on the web setup screen when Supabase is not configured. The desktop
+recorder uses the separate commands in [Two products, separate entry points](#two-products-separate-entry-points).
 
 ## Local development
 
@@ -208,8 +224,11 @@ cp .env.example apps/web/.env.local
 # Start local Supabase, then copy the public URL and anon key from `supabase status` into apps/web/.env.local.
 supabase start
 supabase db reset
-npm run dev
+npm run dev  # Web Dashboard (Next.js)
 ```
+
+To run the desktop product instead, from the repository root run `npm run tauri --workspace @suhbat/desktop -- dev`.
+For the browser-only renderer preview use `npm run dev --workspace @suhbat/desktop`; it does not have native audio capture.
 
 Set `APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `apps/web/.env.local`. `APP_URL` is the canonical origin for signup confirmation and callback redirects; local development may use `http://localhost:3000`, while staging/production require an explicit HTTPS origin (a production server refuses to start otherwise). The web client uses the public anon key with RLS; it does not require `SUPABASE_SERVICE_ROLE_KEY`. If Supabase is not configured, the auth and workspace screens show setup instructions rather than pretending to be backed by a database. The product screens under `/w/[workspaceId]` run on the typed demo adapter described below, which is labelled as demo data on every page. The local Supabase config disables email confirmation for development only; configure the exact canonical Auth redirect URL and confirmation policy separately for a hosted project.
 
@@ -220,9 +239,10 @@ npm run lint
 npm run typecheck
 npm test
 npm run format:check
-npm run build
+npm run build  # Web Dashboard (Next.js)
 npm audit --audit-level=moderate
-npm run desktop:build   # renderer only (vite); the Rust workspace needs a Mac toolchain, see docs/mac-recorder-acceptance.md
+npm run build --workspace @suhbat/desktop  # Recorder renderer only (Vite)
+npm run tauri --workspace @suhbat/desktop -- dev  # Real native recorder; requires Rust + platform toolchain
 ```
 
 A gated Playwright browser journey is available for the real local Supabase Auth/workspace flow. After configuring local Supabase and `apps/web/.env.local`, install Chromium once with `npx playwright install chromium`, then run `E2E_LOCAL_AUTH=true npm run test:e2e`. It creates synthetic local users and records; reset local data afterward with `supabase db reset`. The test is not intended for a hosted/customer project.
