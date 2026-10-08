@@ -15,7 +15,7 @@ Before starting the Web/API server or the Unified Worker in production (`NODE_EN
 | **Deployment**    | `SUHBAT_DATA_MODE`                                                       | Yes (`live`)              | N/A                   | Rejects `demo` fixture mode in production (`validateProductionEnvironment`).                 |
 | **Supabase**      | `NEXT_PUBLIC_SUPABASE_URL`                                               | Yes (`https://...`)       | Yes (`https://...`)   | Hosted Supabase project HTTPS URL.                                                           |
 | **Supabase**      | `NEXT_PUBLIC_SUPABASE_ANON_KEY`                                          | Yes                       | Yes                   | Public anon key only; RLS enforces tenant isolation.                                         |
-| **Supabase**      | `SUPABASE_DB_URL` / `SUPABASE_SERVICE_ROLE_KEY`                          | **No (Forbidden in Web)** | Yes                   | Isolated to the background worker / migration runner only.                                   |
+| **Supabase**      | `SUPABASE_DB_URL` / `SUPABASE_SERVICE_ROLE_KEY`                          | **No (Forbidden in Web)** | Yes                   | Isolated to the Recording API and the background worker / migration runner only.              |
 | **Storage/R2**    | `STORAGE_PROVIDER`                                                       | Yes (`r2`)                | Yes (`r2`)            | `local` and `memory` providers are rejected in production.                                   |
 | **Storage/R2**    | `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Yes                       | Yes                   | Dedicated private Cloudflare R2 bucket credentials (no public access).                       |
 | **Transcription** | `TRANSCRIPTION_PROVIDER`                                                 | N/A                       | Yes (`assemblyai`)    | `fake` provider is rejected in production.                                                   |
@@ -27,9 +27,12 @@ Before starting the Web/API server or the Unified Worker in production (`NODE_EN
 | **Automation**    | `SUHBAT_AUTOMATION_PROVIDER`                                             | Optional (`webhook`)      | Optional (`webhook`)  | `fake` is rejected in production; requires `AUTOMATION_WEBHOOK_SECRET`.                      |
 | **Observability** | `LOG_LEVEL`, `SENTRY_DSN`                                                | Recommended               | Recommended           | Structured JSON logs redact all URLs, tokens, keys, and audio bytes.                         |
 
-Run the programmatic fail-closed audit before deployment:
+Run the programmatic fail-closed audit before deployment. There are **three** deployable roles —
+`web`, `recording-api`, and `worker` — described in [deployment-topology.md](deployment-topology.md):
 
-- Web/API validation: `validateProductionEnvironment(process.env, { role: 'web', throwOnError: true })`
+- Web validation: `validateProductionEnvironment(process.env, { role: 'web', throwOnError: true })`
+- Recording API validation: `validateProductionEnvironment(process.env, { role: 'recording-api', throwOnError: true })`
+- Worker validation: `validateProductionEnvironment(process.env, { role: 'worker', throwOnError: true })`
 - Worker validation: `validateProductionEnvironment(process.env, { role: 'worker', throwOnError: true })`
 
 ---
@@ -40,8 +43,11 @@ Run the programmatic fail-closed audit before deployment:
 
 - [ ] Hosted Supabase project provisioned in target region.
 - [ ] Email/password authentication enabled; PKCE callback URL allowlisted to `${APP_URL}/auth/callback`.
-- [ ] Direct PostgreSQL connection string (`SUPABASE_DB_URL`) configured with TLS (`sslmode=require`) for the isolated worker service.
+- [ ] Direct PostgreSQL connection string (`SUPABASE_DB_URL`) configured with TLS (`sslmode=require`) for the isolated Recording API and worker services.
 - [ ] Verify `NEXT_PUBLIC_SUPABASE_ANON_KEY` is the only Supabase key present in the Web/API deployment environment.
+- [ ] Verify the Web deployment has **no** `SUPABASE_DB_URL` and **no** `SUPABASE_SERVICE_ROLE_KEY` (`printenv` inside the running container).
+- [ ] Verify the Recording API is not publicly reachable (no shared IPv4; private `.flycast` address only) and carries **no** `ASSEMBLYAI_API_KEY` / `OPENAI_API_KEY`.
+- [ ] Verify `SUHBAT_RECORDING_API_URL` on the Web deployment resolves to a private-network host.
 
 ### 2.2 Cloudflare R2 (Private Object Storage)
 

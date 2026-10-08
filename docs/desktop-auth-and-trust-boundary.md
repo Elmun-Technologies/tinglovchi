@@ -24,13 +24,19 @@ identity.
 
 The database URL and the service-role key are read only by:
 
-- `packages/database/src/worker-cli.ts` — the migration runner and the job worker, invoked as
+- `packages/database/src/worker-cli.ts` and `worker-daemon.ts` — the background worker, invoked as
   `validateProductionEnvironment(env, { role: 'worker', throwOnError: true })`.
-- `packages/database/src/worker-executor.ts` — the executor those tools use. Its factory is
-  `getWorkerExecutor(request)` with **no default role**: a caller must write `role: 'worker'`, and
-  any other value throws `Only the worker runtime may create a privileged database executor`. In
-  production it additionally refuses when `SUHBAT_RUNTIME_ROLE` says `web`. When no database URL is
-  configured it returns `null` rather than throwing, so absence stays non-fatal.
+- `apps/recording-api/**` — the private Recording API, the other privileged role.
+- `packages/database/src/worker-executor.ts` — the executor both privileged services use. Its
+  factory is `getWorkerExecutor(request)` with **no default role**: a caller must write
+  `role: 'recording-api'` or `role: 'worker'`, and any other value throws. In production it
+  additionally refuses when `SUHBAT_RUNTIME_ROLE` says `web`, and when the requested role disagrees
+  with the declared one. When no database URL is configured it returns `null` rather than throwing,
+  so absence stays non-fatal.
+
+The two privileged roles are deliberately separate deployments: the one a request can reach
+(`recording-api`) holds no AssemblyAI or OpenAI key, and the one that holds those keys (`worker`) is
+not reachable from a request at all. See [deployment-topology.md](deployment-topology.md).
 - `packages/database/src/production-env.ts` — the fail-closed audit. Since this pass it also checks
   the *reverse* direction: `role: 'web'` **fails** when `SUPABASE_DB_URL` or
   `SUPABASE_SERVICE_ROLE_KEY` is present, so a misconfigured deployment is caught at boot instead of
@@ -64,11 +70,15 @@ invent a call, and a test asserts every name in the list exists in the migration
 ### Consequence for the recording endpoints
 
 Phase 4's `SqlExecutor` needs privileges RLS does not grant, so the web process cannot build it.
-`resolveApiContext`'s live path throws a precise `503` saying the pipeline requires the privileged
-worker service, rather than quietly connecting as the owner. Recording endpoints become live by
-running this API as the worker service (`SUHBAT_RUNTIME_ROLE=worker`, `SUPABASE_DB_URL` set); they
-stay fully exercisable in tests through `setPhase4Runtime`, which is how the integration suite
-drives them.
+Instead the recording routes are a **gateway** (`apps/web/src/lib/recording-gateway.ts`): they
+authenticate the caller here, sign the request, and forward it to the private Recording API over the
+private network. The Recording API verifies the signature, re-checks workspace and meeting
+authorization against the database, and performs the write.
+
+Recording endpoints therefore become live by deploying the `recording-api` service
+(`SUHBAT_RUNTIME_ROLE=recording-api`, `SUPABASE_DB_URL` set) and pointing `SUHBAT_RECORDING_API_URL`
+at it. In tests they are driven in-process against the same Recording API router, with the same
+signing and the same authorization checks — only the socket is missing.
 
 ---
 
@@ -286,6 +296,7 @@ The suites that pin this document down:
 
 | Suite | Covers |
 | --- | --- |
+| `tests/security/three-role-deployment.test.ts` | the three-role split: Web → Recording API trust, authorization re-checks, no providers in the request path, one desktop origin |
 | `tests/security/web-trust-boundary.test.ts` | sections 1, 5 — no privileged credential reachable from `apps/web`; RPC allow-list; capability split |
 | `tests/rls/phase13-desktop-client.test.ts` | sections 2, 3, 4 — rotation, atomic exchange, refresh contention, abuse control, RLS posture |
 | `tests/desktop/cloud-client.test.ts` | the client sends the refresh token only to `/refresh` and never in a URL |

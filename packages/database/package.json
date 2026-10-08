@@ -95,6 +95,18 @@
     "./worker-cli": {
       "types": "./src/worker-cli.ts",
       "import": "./src/worker-cli.ts"
+    },
+    "./internal-service-auth": {
+      "types": "./src/internal-service-auth.ts",
+      "import": "./src/internal-service-auth.ts"
+    },
+    "./production-env": {
+      "types": "./src/production-env.ts",
+      "import": "./src/production-env.ts"
+    },
+    "./internal-service-nonce-store": {
+      "types": "./src/internal-service-nonce-store.ts",
+      "import": "./src/internal-service-nonce-store.ts"
     }
   },
   "dependencies": {

@@ -1,24 +1,20 @@
-import { NextResponse, type NextRequest } from 'next/server';
-import type { AuthorizeChunkUploadRequestInput } from '@suhbat/contracts';
-import {
-  handleApiError,
-  parseJsonBody,
-  resolveApiContext,
-} from '../../../../../../../../lib/api-v1-runtime';
+import type { NextRequest } from 'next/server';
+import { resolveRecordingContext } from '../../../../../../../../lib/recording-gateway';
 
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ recordingId: string; chunkId: string }> },
 ) {
   try {
-    const { service, principal } = await resolveApiContext(request);
     const { recordingId, chunkId } = await context.params;
-    const body = (await parseJsonBody(request, {
-      allowEmpty: true,
-    })) as AuthorizeChunkUploadRequestInput;
-    const result = await service.authorizeChunkUpload(principal, recordingId, chunkId, body);
-    return NextResponse.json(result, { status: 200 });
+    const gateway = await resolveRecordingContext(request);
+    return await gateway.forward({
+      path: `/api/v1/recordings/${encodeURIComponent(recordingId)}/chunks/${encodeURIComponent(chunkId)}/upload`,
+      method: 'POST',
+      body: await request.text(),
+    });
   } catch (cause) {
+    const { handleApiError } = await import('../../../../../../../../lib/api-v1-runtime');
     return handleApiError(cause);
   }
 }

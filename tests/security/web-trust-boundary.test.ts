@@ -96,7 +96,7 @@ describe('the privileged executor refuses to be built by the web', () => {
     await expect(
       // @ts-expect-error deliberately passing a role that must never be accepted
       getWorkerExecutor({ role: 'web' }),
-    ).rejects.toThrow(/Only the worker runtime may create a privileged database executor/);
+    ).rejects.toThrow(/Only the privileged services \(recording-api, worker\) may create a database executor/);
   });
 
   it('refuses in production when the process declares itself the web role', async () => {
@@ -153,17 +153,29 @@ describe('production validation forbids the database credential in the web role'
     expect(result.errors.filter((error) => /SUPABASE_DB_URL|SERVICE_ROLE/.test(error))).toEqual([]);
   });
 
-  it('does not disturb the combined (role=all) validation the worker relies on', () => {
+  it('a worker deployment validates cleanly with the database credential and the provider stack', () => {
     const result = validateProductionEnvironment(
       {
         ...base,
+        // A private service connects with SUPABASE_DB_URL and never serves a browser, so it holds
+        // neither public Supabase variable.
+        NEXT_PUBLIC_SUPABASE_URL: undefined,
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: undefined,
+        SUHBAT_RUNTIME_ROLE: 'worker',
         SUPABASE_DB_URL: 'postgresql://worker:pw@db.proj.supabase.co:5432/postgres',
+        STORAGE_PROVIDER: 'r2',
+        R2_ACCOUNT_ID: 'acc',
+        R2_BUCKET: 'bucket',
+        R2_ACCESS_KEY_ID: 'ak',
+        R2_SECRET_ACCESS_KEY: 'sk',
         TRANSCRIPTION_PROVIDER: 'assemblyai',
         ASSEMBLYAI_API_KEY: 'aai',
         SUHBAT_INTELLIGENCE_PROVIDER: 'openai',
+        SUHBAT_EMBEDDING_PROVIDER: 'openai',
       },
       { role: 'worker', throwOnError: false },
     );
+    expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
   });
 });

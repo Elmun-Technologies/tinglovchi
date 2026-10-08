@@ -1,0 +1,27 @@
+# Recording API — PRIVATE. No public address; reachable only over the Fly private network.
+#
+# SUHBAT_RUNTIME_ROLE=recording-api. Holds SUPABASE_DB_URL and the R2 credentials.
+# Must NOT carry ASSEMBLYAI_API_KEY, OPENAI_API_KEY, TELEGRAM_BOT_TOKEN or
+# AUTOMATION_WEBHOOK_SECRET — validation refuses to start if it does.
+#
+# After `fly apps create`, allocate the private address and drop the public one:
+#   fly ips allocate-v6 --private --app <name>
+#   fly ips release <public-ipv4> --app <name>
+app = "suhbat-recording-api"
+
+[build]
+  dockerfile = "deploy/Dockerfile.recording-api"
+
+[env]
+  SUHBAT_RUNTIME_ROLE = "recording-api"
+  NODE_ENV = "production"
+  PORT = "8080"
+  HOST = "0.0.0.0"
+
+# Deliberately NO [[services]] block: nothing is published to the internet.
+# Health checking happens over the private network from the web app.
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

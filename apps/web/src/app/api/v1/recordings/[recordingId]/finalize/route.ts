@@ -1,26 +1,20 @@
-import { NextResponse, type NextRequest } from 'next/server';
-import type { FinalizeRecordingRequestInput } from '@suhbat/contracts';
-import {
-  handleApiError,
-  parseJsonBody,
-  resolveApiContext,
-} from '../../../../../../lib/api-v1-runtime';
+import type { NextRequest } from 'next/server';
+import { resolveRecordingContext } from '../../../../../../lib/recording-gateway';
 
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ recordingId: string }> },
 ) {
   try {
-    const { service, principal } = await resolveApiContext(request);
     const { recordingId } = await context.params;
-    const body = (await parseJsonBody(request, {
-      allowEmpty: true,
-    })) as FinalizeRecordingRequestInput;
-    const result = await service.finalizeRecording(principal, recordingId, body);
-    return NextResponse.json(result, {
-      status: result.status === 'finalized' ? 200 : 409,
+    const gateway = await resolveRecordingContext(request);
+    return await gateway.forward({
+      path: `/api/v1/recordings/${encodeURIComponent(recordingId)}/finalize`,
+      method: 'POST',
+      body: await request.text(),
     });
   } catch (cause) {
+    const { handleApiError } = await import('../../../../../../lib/api-v1-runtime');
     return handleApiError(cause);
   }
 }

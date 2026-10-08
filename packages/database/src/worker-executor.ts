@@ -13,8 +13,9 @@ import type { SqlExecutor } from './phase4-backbone.ts';
  * So this module does three things the earlier `postgres-executor.ts` did not:
  *
  * 1. It is exported as `@suhbat/database/worker-executor`, never as a general database helper.
- * 2. `getWorkerExecutor` requires an explicit `{ role: 'worker' }`. There is no default and no
- *    zero-argument form, so it cannot be constructed by accident from request-handling code.
+ * 2. `getWorkerExecutor` requires an explicit role (`'recording-api'` or `'worker'`). There is no
+ *    default and no zero-argument form, so it cannot be constructed by accident from
+ *    request-handling code.
  * 3. It fails closed in production when the process declares itself a web role.
  *
  * `tests/security/web-trust-boundary.test.ts` asserts statically that no file under `apps/web`
@@ -124,10 +125,25 @@ function sslOptionsFor(connectionString: string): { ssl?: false | { rejectUnauth
 /**
  * The only runtime roles allowed to hold a privileged database credential.
  *
- * `'worker'` is the unified background worker and the migration runner. There is deliberately no
- * `'web'` member: the web process must never reach this function.
+ * There are exactly two, and they are separate deployments for a reason:
+ *
+ *   `'recording-api'` — the private Recording API. Owns the Phase 4 recording write path. Reachable
+ *                       only from the Web gateway over the private network. No processing providers,
+ *                       no worker loop, no dashboard.
+ *   `'worker'`         — the background worker and migration runner. Owns transcription,
+ *                       intelligence, embeddings, knowledge indexing, and automation. Has no
+ *                       user-facing request surface.
+ *
+ * There is deliberately no `'web'` member: the web process must never reach this function.
+ *
+ * The split matters because one privileged process that did both jobs would need both the
+ * request-facing attack surface *and* every provider credential. Keeping them apart means the
+ * service a user's request can reach holds no AssemblyAI or OpenAI key, and the service that holds
+ * those keys is not reachable from a request at all.
  */
-export type PrivilegedRuntimeRole = 'worker';
+export type PrivilegedRuntimeRole = 'recording-api' | 'worker';
+
+export const PRIVILEGED_RUNTIME_ROLES: readonly PrivilegedRuntimeRole[] = ['recording-api', 'worker'];
 
 export type WorkerExecutorRequest = {
   /**
@@ -144,17 +160,27 @@ export type WorkerExecutorRequest = {
  */
 function assertPrivilegedRole(request: WorkerExecutorRequest): Record<string, string | undefined> {
   const env = request.env ?? process.env;
-  if (request.role !== 'worker') {
+  if (!PRIVILEGED_RUNTIME_ROLES.includes(request.role)) {
     throw new Error(
-      'Only the worker runtime may create a privileged database executor. The web deployment ' +
-        'must reach PostgreSQL through the user session or a narrowly scoped RPC ' +
+      'Only the privileged services (recording-api, worker) may create a database executor. The ' +
+        'web deployment must reach PostgreSQL through the user session or a narrowly scoped RPC ' +
         '(see docs/production-readiness.md).',
     );
   }
-  if (env.NODE_ENV === 'production' && (env.SUHBAT_RUNTIME_ROLE ?? '').trim().toLowerCase() === 'web') {
+  const declared = (env.SUHBAT_RUNTIME_ROLE ?? '').trim().toLowerCase();
+  if (declared === 'web') {
     throw new Error(
       'This process declares SUHBAT_RUNTIME_ROLE=web, which forbids SUPABASE_DB_URL. ' +
-        'Start the worker service for pipeline work.',
+        'Start the recording-api or worker service for privileged database work.',
+    );
+  }
+  // Defence in depth: the role the caller asked for and the role the process declares must agree.
+  // A web deployment that somehow reached this code with `role: 'worker'` would otherwise be
+  // handed an owner connection.
+  if (env.NODE_ENV === 'production' && declared && declared !== request.role) {
+    throw new Error(
+      `This process declares SUHBAT_RUNTIME_ROLE=${declared}, which does not match the requested ` +
+        `role "${request.role}". Refusing to hand out a privileged database executor.`,
     );
   }
   return env;
