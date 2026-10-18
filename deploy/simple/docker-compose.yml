@@ -1,0 +1,43 @@
+# One-button recorder on any small Linux server (Oracle Cloud Always Free, Hetzner, a local VPS).
+# Caddy gets an HTTPS certificate automatically; the browser only allows the microphone over HTTPS.
+#
+#   cp .env.example .env   # fill it in
+#   docker compose up -d --build
+#
+# Recordings and analyses live in the `suhbat_data` volume (see backup.sh).
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      SUHBAT_DATA_DIR: /data
+      APP_URL: https://${DOMAIN}
+    volumes:
+      - suhbat_data:/data
+    expose:
+      - '3000'
+
+  caddy:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  suhbat_data:
+  caddy_data:
+  caddy_config:

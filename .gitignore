@@ -49,3 +49,4 @@ supabase/.temp/
 .DS_Store
 *.log
 .suhbat-data/
+deploy/simple/backups/

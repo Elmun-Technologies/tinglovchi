@@ -19,13 +19,7 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME
 
-RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y \
-      build-essential \
-      node-gyp \
-      pkg-config \
-      python-is-python3 && \
-    rm -rf /var/lib/apt/lists/*
+# No native toolchain: every dependency ships prebuilt binaries (esbuild) or is pure JavaScript.
 
 COPY . .
 
