@@ -12,10 +12,7 @@ import { MemoryStorageProvider } from '@suhbat/database/storage';
 import { PRIVILEGED_RUNTIME_ROLES, getWorkerExecutor } from '@suhbat/database/worker-executor';
 import { validateProductionEnvironment } from '@suhbat/database/production-env';
 import {
-  KEY_ID_HEADER,
-  NONCE_HEADER,
   SIGNATURE_HEADER,
-  TIMESTAMP_HEADER,
   USER_ID_HEADER,
   createNonceStore,
   signInternalRequest,
@@ -29,8 +26,6 @@ import {
   setRecordingGateway,
 } from '../../apps/web/src/lib/recording-gateway';
 import { POST as postRecordingRoute } from '../../apps/web/src/app/api/v1/recordings/route';
-import { POST as postChunkRoute } from '../../apps/web/src/app/api/v1/recordings/[recordingId]/chunks/route';
-import { POST as postFinalizeRoute } from '../../apps/web/src/app/api/v1/recordings/[recordingId]/finalize/route';
 
 /**
  * The three-role deployment boundary.
@@ -437,7 +432,8 @@ describe('3. recording-api and worker are distinct runtime roles', () => {
   });
 
   it('recording-api rejects a missing database credential', () => {
-    const { SUPABASE_DB_URL: _omitted, ...withoutDb } = recordingApiBase;
+    const withoutDb = { ...recordingApiBase };
+    delete (withoutDb as Partial<typeof recordingApiBase>).SUPABASE_DB_URL;
     const result = validateProductionEnvironment(withoutDb, {
       role: 'recording-api',
       throwOnError: false,

@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { resolveRecordingContext } from '../../../../../lib/recording-gateway';
 
 async function handleApiError(cause: unknown) {

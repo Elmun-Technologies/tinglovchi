@@ -64,7 +64,6 @@ export function createPostgresNonceStore(
   const db = options.db;
   const purgeEveryClaims = Math.max(1, options.purgeEveryClaims ?? 100);
   const purgeMaxRows = Math.max(1, options.purgeMaxRows ?? 1_000);
-  const now = options.now ?? (() => Date.now());
   const onError = options.onError ?? (() => {});
 
   let claimsSincePurge = 0;

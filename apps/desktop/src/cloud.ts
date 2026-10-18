@@ -26,7 +26,6 @@ import {
   type DesktopConnectCodeResponse,
   type DesktopSessionInfoResponse,
   type DesktopSessionResponse,
-  type RefreshDesktopSessionRequestInput,
   type RefreshDesktopSessionResponse,
   type DesktopWorkspaceListResponse,
   type FinalizeRecordingRequestInput,

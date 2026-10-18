@@ -9,12 +9,10 @@ import { Phase4BackboneService, type AuthenticatedPrincipal } from '@suhbat/data
 import { MemoryStorageProvider } from '@suhbat/database/storage';
 import { setPhase4Runtime } from '../../apps/web/src/lib/api-v1-runtime';
 import { POST as postConnectCode } from '../../apps/web/src/app/api/v1/desktop/connect-codes/route';
-import { GET as getConnectCode } from '../../apps/web/src/app/api/v1/desktop/connect-codes/route';
 import { POST as postRefresh } from '../../apps/web/src/app/api/v1/desktop/sessions/refresh/route';
 import {
   DELETE as deleteDesktopSession,
   GET as getDesktopSession,
-  POST as postDesktopSession,
 } from '../../apps/web/src/app/api/v1/desktop/sessions/route';
 import { consumeConnectCodeBudget, resetConnectCodeBudget } from '../../apps/web/src/lib/connect-code-rate-limit';
 
@@ -457,7 +455,7 @@ describe('refresh rotation', () => {
 
   it('rotates on every use, so no refresh token is ever accepted twice', async () => {
     await issueSession();
-    let token = (await db.query<{ refresh_token_hash: string }>(
+    const token = (await db.query<{ refresh_token_hash: string }>(
       `select refresh_token_hash from public.desktop_sessions`,
     )).rows[0]!.refresh_token_hash;
 

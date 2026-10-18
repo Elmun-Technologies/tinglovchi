@@ -80,10 +80,14 @@ export function App() {
   const [captureSystemAudio, setCaptureSystemAudio] = useState(true);
   const [recoveredSessionId, setRecoveredSessionId] = useState<string | null>(null);
 
+  // Kept current by `persistSession`, the only writer of `session`.
   const sessionRef = useRef(session);
-  sessionRef.current = session;
+  const uploadSessionIdRef = useRef<string | null>(null);
 
   const apiBase = useMemo(() => cloudBaseUrl(readBuildEnv()), []);
+  // The client and runner below only dereference refs inside callbacks run from effects and handlers,
+  // never during render; the compiler cannot see that through the factory calls.
+  /* eslint-disable react-hooks/refs, react-hooks/preserve-manual-memoization */
   const cloud: CloudClient | null = useMemo(
     () =>
       apiBase
@@ -108,8 +112,8 @@ export function App() {
     });
     return createUploadRunner({ queue, reader: () => Promise.resolve(new Uint8Array()) });
   }, [bridge, cloud]);
+  /* eslint-enable react-hooks/refs, react-hooks/preserve-manual-memoization */
 
-  const uploadSessionIdRef = useRef<string | null>(null);
   const meetingRef = useRef<MeetingContext | null>(null);
   // Read through a function so TypeScript does not narrow the ref to `null` after an assignment:
   // meeting linkage is set asynchronously and must be re-read after every await.
@@ -372,7 +376,6 @@ export function App() {
       },
       (error) => send({ type: 'error', error }),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, dispatch]);
 
   /* ------------------------------------------------------ upload pumping */
@@ -735,7 +738,7 @@ export function App() {
       uploadSessionIdRef.current = null;
       fail(cause, { tone: 'warn', title: copy.errors.uploadRetry });
     }
-  }, [bridge, cloud, panel.recovery, recoveredSessionId, uploadRunner, workspace?.id]);
+  }, [bridge, cloud, fail, panel.recovery, recoveredSessionId, uploadRunner, workspace]);
 
   /* --------------------------------------------------------------- render */
 

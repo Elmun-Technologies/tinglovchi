@@ -107,33 +107,14 @@ export type SupabaseLiveRepositoryContext = {
 
 type Row = Record<string, unknown>;
 
-function text(row: Row, key: string): string {
-  const value = row[key];
-  return typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value);
-}
 
 function textOrNull(row: Row, key: string): string | null {
   const value = row[key];
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-function num(row: Row, key: string): number {
-  const value = row[key];
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
-function numOrNull(row: Row, key: string): number | null {
-  const value = row[key];
-  if (value === null || value === undefined || value === '') return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
-function bool(row: Row, key: string): boolean {
-  return row[key] === true;
-}
 
 function toIso(value: unknown, fallback?: string): string {
   if (value instanceof Date) return value.toISOString();
@@ -144,10 +125,6 @@ function toIso(value: unknown, fallback?: string): string {
   return fallback ?? new Date().toISOString();
 }
 
-function toIsoOrNull(value: unknown): string | null {
-  if (value === null || value === undefined || value === '') return null;
-  return toIso(value);
-}
 
 function toTextArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
@@ -2224,20 +2201,13 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
   const settingsRepo: ProductRepositories['settings'] = {
     async get(workspaceId: string): Promise<SettingsSnapshot> {
       const membership = await requireMembership(workspaceId);
-      const [workspace, members, meetingTypes, participantRows] = await Promise.all([
+      const [workspace, members, meetingTypes] = await Promise.all([
         readMaybeRow<WorkspaceRow>(
           client.from('workspaces').select('id, name, slug, created_at').eq('id', workspaceId),
           'settings.get',
         ),
         workspacesRepo.members(workspaceId),
         meetingsRepo.meetingTypes(workspaceId),
-        readRows<ParticipantRow>(
-          client
-            .from('meeting_participants')
-            .select('id, display_name, is_external')
-            .eq('workspace_id', workspaceId),
-          'settings.get',
-        ),
       ]);
       if (!workspace) {
         throw new RepositoryError('not_found', 'This workspace does not exist.', {

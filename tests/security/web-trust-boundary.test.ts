@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,11 +22,9 @@ import { validateProductionEnvironment } from '../../packages/database/src/produ
  */
 
 const ROOT = join(__dirname, '..', '..');
-const WEB = join(ROOT, 'apps', 'web');
 
 /** Every source file in the web app. */
 function webFiles(): string[] {
-  const { execSync } = require('node:child_process') as typeof import('node:child_process');
   const output = execSync(
     `find apps/web/src apps/web/*.ts apps/web/*.mjs apps/web/*.js -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.mjs' \\) 2>/dev/null || true`,
     { cwd: ROOT, encoding: 'utf8' },
