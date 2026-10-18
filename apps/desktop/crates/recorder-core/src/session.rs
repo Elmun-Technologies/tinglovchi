@@ -27,7 +27,7 @@ use crate::manifest::{
 };
 use crate::platform::{AudioDevice, PermissionSnapshot};
 use crate::state::{manifest_state_of, RecorderState, StateMachine};
-use crate::storage::{preflight_disk, write_manifest_atomic, RecorderRoot};
+use crate::storage::{preflight_disk, write_manifest_atomic, RecorderRoot, DISK_RESERVE_BYTES};
 use crate::timeline::{
     canonical_duration_ms, meeting_ms_from_ticks, ActiveInterval, GapReason, SourceSegment, TimelineOrigin,
 };
@@ -234,6 +234,29 @@ pub struct Recorder<B: CaptureBackend, C: Clock = SystemClock> {
 // See `apps/desktop/src-tauri/src/platform.rs`. On non-macOS targets the backend fails every start with
 // `platform_unsupported`, which is the required fail-closed behaviour.
 
+/// Dropping a recorder without [`Recorder::stop`] leaves the disk exactly as a crash would (the open
+/// chunk stays a `.partial`, the manifest keeps its last revision) for startup recovery to reconcile,
+/// but it does not leave capture streams or writer threads running in the background.
+impl<B: CaptureBackend, C: Clock> Drop for Recorder<B, C> {
+    fn drop(&mut self) {
+        for handle in self.writers.values_mut() {
+            handle.callback_stopped.store(true, Ordering::Release);
+            let _ = handle.control.send(WriterCommand::Abort);
+            handle.queue.close();
+        }
+        for stream in self.streams.values() {
+            if let Ok(mut guard) = stream.lock() {
+                let _ = guard.stop();
+            }
+        }
+        for handle in self.writers.values_mut() {
+            if let Some(thread) = handle.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+}
+
 impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
     #[must_use]
     pub fn new(root: RecorderRoot, backend: Arc<B>, clock: Arc<C>) -> Self {
@@ -358,6 +381,13 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
     /// Commit `ready -> recording`: capture `t = 0`, create the session directory, write manifest
     /// revision 1, then start capture and the writer threads.
     pub fn start(&mut self, request: &StartRequest) -> Result<RecorderStatus, RecorderError> {
+        if self.state.state() == RecorderState::PermissionBlocked {
+            // Name the permission that blocks capture (with its settings pointer) rather than reporting
+            // a bare state error the user cannot act on.
+            if let Some(error) = self.permission_error(&self.backend.permission_snapshot(), request) {
+                return Err(error);
+            }
+        }
         if self.state.state() != RecorderState::Ready {
             return Err(RecorderError::new(
                 RecorderErrorCode::InvalidStateTransition,
@@ -391,21 +421,7 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
             self.enter_fault(&error);
             return Err(error);
         }
-        if !snapshot.microphone.is_granted() {
-            let error = RecorderError::new(RecorderErrorCode::PermissionDenied, "microphone permission is not granted", true)
-                .with_source(SourceKind::Microphone)
-                .with_settings_hint(self.backend.settings_url(SourceKind::Microphone));
-            self.enter_fault(&error);
-            return Err(error);
-        }
-        if request.capture_system_audio && !snapshot.system_audio.is_granted() {
-            let error = RecorderError::new(
-                RecorderErrorCode::SystemAudioUnavailable,
-                "system audio capture was requested but is not available; the session was NOT started as a microphone-only recording",
-                true,
-            )
-            .with_source(SourceKind::SystemAudio)
-                .with_settings_hint(self.backend.settings_url(SourceKind::SystemAudio));
+        if let Some(error) = self.permission_error(&snapshot, request) {
             self.enter_fault(&error);
             return Err(error);
         }
@@ -416,7 +432,6 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
         let session_id = uuid::Uuid::new_v4();
         let recording_id = uuid::Uuid::new_v4();
         let session_dir = self.root.session_dir(&session_id.to_string())?;
-        self.root.prepare_session_dir(&session_dir)?;
 
         // `t = 0`: the reading taken now, before the streams are requested. Never reset later.
         let origin_ticks = self.clock.monotonic_ticks();
@@ -479,7 +494,7 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
             required_bytes: preflight.required_bytes,
             projected_bytes_per_hour: preflight.projected_bytes_per_hour,
             sufficient: preflight.sufficient,
-            reserve_bytes: preflight.reserve_bytes,
+            reserve_bytes: DISK_RESERVE_BYTES,
         });
         if !preflight.sufficient {
             let error = RecorderError::new(
@@ -488,13 +503,16 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
                     "not enough free space: {} bytes required for the planned session, {} available",
                     preflight.required_bytes, preflight.available_bytes
                 ),
-                true,
+                // Retrying the same request cannot succeed; the user must free space or plan shorter.
+                false,
             );
             self.enter_fault(&error);
             return Err(error);
         }
+        // Created only once the pre-checks pass, so a refused start leaves nothing on disk.
+        self.root.prepare_session_dir(&session_dir)?;
 
-        let mut manifest = RecorderManifest {
+        let manifest = RecorderManifest {
             schema_version: MANIFEST_SCHEMA_VERSION,
             revision: 1,
             workspace_id: request.workspace_id.clone(),
@@ -701,6 +719,13 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
             interval.end_ticks = Some(ticks);
         }
         if let Some(manifest) = self.manifest.as_mut() {
+            // Nothing is delivering while paused; a source turns active again with its first block
+            // after resume (see the `Progress` outcome).
+            for source in &mut manifest.sources {
+                if source.state == SourceHealth::Active {
+                    source.state = SourceHealth::Starting;
+                }
+            }
             manifest.pause_intervals.push(GapRecord {
                 meeting_start_ms: meeting_ms,
                 meeting_end_ms: meeting_ms,
@@ -958,7 +983,7 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
             required_bytes: preflight.required_bytes,
             projected_bytes_per_hour: preflight.projected_bytes_per_hour,
             sufficient: preflight.sufficient,
-            reserve_bytes: preflight.reserve_bytes,
+            reserve_bytes: DISK_RESERVE_BYTES,
         });
         if was_sufficient && !preflight.sufficient && self.state.state().is_capturing() {
             self.events.push(RecorderEvent::Fault {
@@ -975,13 +1000,17 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
         if !self.state.state().is_capturing() {
             return;
         }
-        let now_ms = self.clock.monotonic_ticks() / 1_000_000;
+        let Some(origin) = self.origin else {
+            return;
+        };
+        // Compare like with like: `level_meeting_ms` holds meeting-relative milliseconds.
+        let now_ms = meeting_ms_from_ticks(&origin, self.clock.monotonic_ticks());
         let stalled: Vec<SourceKind> = self
             .levels
             .iter()
             .filter_map(|(kind, level)| {
                 let last = self.level_meeting_ms.get(kind).copied().unwrap_or(0);
-                (level.live && now_ms.saturating_sub(last) > u128::from(STALL_THRESHOLD_MS)).then_some(*kind)
+                (level.live && now_ms.saturating_sub(last) > STALL_THRESHOLD_MS).then_some(*kind)
             })
             .collect();
         for kind in stalled {
@@ -1142,7 +1171,7 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
         let mut events = Vec::new();
         loop {
             let outcome = match self.outcomes.lock() {
-                Ok(mut receiver) => receiver.try_recv(),
+                Ok(receiver) => receiver.try_recv(),
                 Err(_) => break,
             };
             let Ok(outcome) = outcome else { break };
@@ -1206,15 +1235,13 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
                                 source.first_sample_index = first_sample_index;
                                 source.first_sample_meeting_ms = meeting_ms;
                             }
-                            if segment_index > 0 {
-                                source.sample_map.push(SourceSegment {
-                                    first_sample_index,
-                                    first_sample_ticks: first_tick,
-                                    sample_count: 0,
-                                });
-                            } else if let Some(last) = source.sample_map.last_mut() {
-                                last.first_sample_ticks = first_tick;
-                                last.first_sample_index = first_sample_index;
+                            // A later segment is added to the sample map by `upsert_segment` once it
+                            // holds samples: persisting it empty would make the manifest invalid.
+                            if segment_index == 0 {
+                                if let Some(last) = source.sample_map.last_mut() {
+                                    last.first_sample_ticks = first_tick;
+                                    last.first_sample_index = first_sample_index;
+                                }
                             }
                             let _ = reason;
                         }
@@ -1287,6 +1314,29 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
         Ok(())
     }
 
+    /// The error that keeps `request` from capturing under `snapshot`, if any.
+    fn permission_error(&self, snapshot: &PermissionSnapshot, request: &StartRequest) -> Option<RecorderError> {
+        if !snapshot.microphone.is_granted() {
+            return Some(
+                RecorderError::new(RecorderErrorCode::PermissionDenied, "microphone permission is not granted", true)
+                    .with_source(SourceKind::Microphone)
+                    .with_settings_hint(self.backend.settings_url(SourceKind::Microphone)),
+            );
+        }
+        if request.capture_system_audio && !snapshot.system_audio.is_granted() {
+            return Some(
+                RecorderError::new(
+                    RecorderErrorCode::SystemAudioUnavailable,
+                    "system audio capture was requested but is not available; the session was NOT started as a microphone-only recording",
+                    true,
+                )
+                .with_source(SourceKind::SystemAudio)
+                .with_settings_hint(self.backend.settings_url(SourceKind::SystemAudio)),
+            );
+        }
+        None
+    }
+
     fn enter_fault(&mut self, error: &RecorderError) {
         self.events.push(RecorderEvent::Fault { error: error.clone() });
         let blocked = matches!(
@@ -1339,7 +1389,7 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
                 upsert_segment(source, current);
             }
         }
-        let result = (|| {
+        let result = (|| -> Result<(), RecorderError> {
             manifest.validate()?;
             if let Some(dir) = self.session_dir.as_ref() {
                 write_manifest_atomic(dir, manifest)?;
@@ -1437,6 +1487,11 @@ impl<B: CaptureBackend + 'static, C: Clock + 'static> Recorder<B, C> {
 /// audio.
 fn upsert_segment(source: &mut SourceRecord, current: &CurrentSegment) {
     let samples = source.last_sample_index_exclusive.saturating_sub(current.first_sample_index);
+    if samples == 0 {
+        // The segment has started but delivered nothing yet; it is mapped once it holds samples (an
+        // empty segment is invalid in the manifest).
+        return;
+    }
     if let Some(last) = source.sample_map.last_mut() {
         if last.first_sample_index == current.first_sample_index {
             last.sample_count = samples;

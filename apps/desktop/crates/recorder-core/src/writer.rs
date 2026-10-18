@@ -13,7 +13,7 @@
 //! lost audio is recorded as a gap instead of being papered over.
 
 use crate::capture::{AudioBlock, BoundedBlockQueue};
-use crate::errors::{RecorderError, RecorderErrorCode, SourceKind};
+use crate::errors::{RecorderError, SourceKind};
 use crate::levels::{measure_i16, LevelSnapshot};
 use crate::manifest::{
     chunk_file_name, idempotency_key, partial_file_name, Checksum, ChecksumAlgorithm, ChunkRecord, ChunkState, CaptureFormat,
@@ -164,14 +164,13 @@ impl ChunkWriter {
         while !self.aborted {
             batch.clear();
             let received = self.queue.pop_batch_timeout(32, &mut batch, POLL_INTERVAL);
-            self.poll_control();
-            self.poll_overflow();
+            // Blocks already taken off the queue were accepted before any command seen below, so they
+            // are written first; otherwise a `Flush` would close the chunk and these would open a new one.
             for block in batch.drain(..) {
-                if self.aborted {
-                    break;
-                }
                 self.handle_block(block);
             }
+            self.poll_control();
+            self.poll_overflow();
             if !received && self.queue.is_closed() && self.queue.pending_blocks() == 0 {
                 break;
             }
@@ -189,6 +188,8 @@ impl ChunkWriter {
         while let Ok(command) = self.control.try_recv() {
             match command {
                 WriterCommand::Flush => {
+                    // Everything accepted before the flush belongs in the chunks it closes.
+                    self.drain_queue();
                     self.finalize_open();
                     let _ = self.outcomes.send(WriterOutcome::Flushed { kind: self.spec.kind });
                     self.flush_ack.store(true, Ordering::Release);
@@ -197,6 +198,16 @@ impl ChunkWriter {
                     self.aborted = true;
                     self.queue.close();
                 }
+            }
+        }
+    }
+
+    /// Write every block still queued, without waiting for more.
+    fn drain_queue(&mut self) {
+        let mut batch: Vec<AudioBlock> = Vec::with_capacity(16);
+        while !self.aborted && self.queue.pop_batch_timeout(32, &mut batch, Duration::ZERO) {
+            for block in batch.drain(..) {
+                self.handle_block(block);
             }
         }
     }
@@ -384,14 +395,15 @@ impl ChunkWriter {
                 return;
             }
         };
+        // Container header plus PCM payload; recorded for the size consistency check only. Read before
+        // the rename, which consumes the finalized handle.
+        let byte_size = finalized.byte_size();
         let final_relative = PathBuf::from(chunk_file_name(self.spec.kind, self.sequence_no, CaptureFormat::WavPcmS16Le));
         let renamed = finalized.rename_to(&self.spec.session_dir, &final_relative);
         if let Err(error) = renamed {
             self.report_fault(error);
             return;
         }
-        // Container header plus PCM payload; recorded for the size consistency check only.
-        let byte_size = finalized.byte_size();
         let record = ChunkRecord {
             chunk_id: uuid::Uuid::new_v4().to_string(),
             recording_id: self.spec.recording_id.clone(),

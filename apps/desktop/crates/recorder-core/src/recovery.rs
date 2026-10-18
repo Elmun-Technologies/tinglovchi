@@ -13,14 +13,15 @@
 //! * monotonic ticks from a different clock epoch are never subtracted from current readings: the gap
 //!   is recorded as estimated (see `timeline::estimated_gap_record`).
 
-use crate::clock::{Clock, SystemClock};
+use crate::clock::Clock;
 use crate::errors::{RecorderError, RecorderErrorCode, SourceKind};
 use crate::manifest::{
-    chunk_file_name, idempotency_key, CaptureFormat, ChunkRecord, ChunkState, Checksum, ChecksumAlgorithm, DecimalU128,
-    ManifestState, RecorderManifest, SourceHealth, UploadState, VerificationState, MIN_CHUNK_BYTES,
+    chunk_file_name, idempotency_key, salvaged_chunk_file_name, CaptureFormat, ChunkRecord, ChunkState, Checksum,
+    ChecksumAlgorithm, DecimalU128, ManifestState, RecorderManifest, SourceHealth, SourceRecord, UploadState,
+    VerificationState, MIN_CHUNK_BYTES,
 };
 use crate::storage::{join_within, set_private_file, sync_dir, write_manifest_atomic, RecorderRoot};
-use crate::timeline::{meeting_ms_from_ticks, sample_ticks, TimelineOrigin};
+use crate::timeline::{meeting_ms_from_ticks, sample_ticks, SourceSegment, TimelineOrigin};
 use crate::wav;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -170,21 +171,12 @@ pub fn scan_and_reconcile(
                 "clock epoch changed ({} -> {}): the gap after the last durable offset is estimated from wall time",
                 manifest.timeline.clock_epoch_id, current_epoch
             ));
-            let last = manifest
-                .sources
-                .iter()
-                .filter_map(|source| source.ended_at_ticks.map(|ticks| ticks.get()).or(Some(source.started_at_ticks.get())))
-                .max()
-                .unwrap_or(0);
+            // An open gap (end == start) from the last durable meeting offset; ticks of the old epoch
+            // are never compared with current readings.
+            let last_durable_ms = last_durable_end_ms(&manifest);
             manifest.pause_intervals.push(crate::manifest::GapRecord {
-                meeting_start_ms: meeting_ms_from_ticks(
-                    &origin_of(&manifest),
-                    u128::try_from(last).unwrap_or(0),
-                ),
-                meeting_end_ms: meeting_ms_from_ticks(
-                    &origin_of(&manifest),
-                    u128::try_from(last).unwrap_or(0),
-                ),
+                meeting_start_ms: last_durable_ms,
+                meeting_end_ms: last_durable_ms,
                 estimated: true,
                 reason: crate::timeline::GapReason::ClockEpochChanged,
                 source_kind: None,
@@ -215,17 +207,25 @@ pub fn scan_and_reconcile(
             manifest.state = ManifestState::Interrupted;
             manifest.revision = manifest.revision.saturating_add(1);
             manifest.last_updated_at = now_rfc3339.to_string();
+            let origin = origin_of(&manifest);
             if let Some(interval) = manifest.active_intervals.last_mut() {
                 if interval.end_ticks.is_none() {
                     // Close the open interval at the last durable sample time so the accounting is finite.
+                    // A crashed source has no end tick, so its last mapped sample stands in for it.
                     let last_ticks = manifest
                         .sources
                         .iter()
-                        .filter_map(|source| source.ended_at_ticks.map(|ticks| ticks.get()))
-                        .max();
+                        .filter_map(|source| {
+                            source
+                                .ended_at_ticks
+                                .map(DecimalU128::get)
+                                .or_else(|| mapped_end_ticks(source, &origin))
+                        })
+                        .max()
+                        .filter(|ticks| *ticks > interval.start_ticks.get());
                     interval.end_ticks = last_ticks.map(DecimalU128);
                     if let Some(ticks) = last_ticks {
-                        interval.meeting_end_ms = Some(meeting_ms_from_ticks(&origin_of(&manifest), ticks));
+                        interval.meeting_end_ms = Some(meeting_ms_from_ticks(&origin, ticks));
                     }
                 }
             }
@@ -306,9 +306,14 @@ pub fn close_interrupted_session(
     if manifest.state != ManifestState::Stopped {
         let now = crate::clock::SystemClock::new();
         let stamp = now.wall_clock_rfc3339(now.wall_clock_ms());
+        let origin = origin_of(&manifest);
         for source in &mut manifest.sources {
             if source.ended_at_ticks.is_none() {
-                source.ended_at_ticks = Some(source.started_at_ticks.clone());
+                // End at the last mapped sample. An end equal to the start fails validation, so a source
+                // with no mapped audio keeps no end tick rather than an invented one.
+                source.ended_at_ticks = mapped_end_ticks(source, &origin)
+                    .filter(|end| *end > source.started_at_ticks.get())
+                    .map(DecimalU128);
             }
             if source.state == SourceHealth::Unavailable {
                 // A source that failed stays failed: claiming it recovered would misdescribe the audio.
@@ -318,10 +323,19 @@ pub fn close_interrupted_session(
                 source.state = SourceHealth::Active;
             }
         }
+        let last_source_end = manifest
+            .sources
+            .iter()
+            .filter_map(|source| source.ended_at_ticks.map(DecimalU128::get))
+            .max();
         for interval in &mut manifest.active_intervals {
             if interval.end_ticks.is_none() {
-                interval.end_ticks = Some(interval.start_ticks.clone());
-                interval.meeting_end_ms = Some(interval.meeting_start_ms);
+                // Same rule as above: close the open interval at the last durable sample, never at its
+                // own start (an empty interval is invalid).
+                if let Some(end) = last_source_end.filter(|end| *end > interval.start_ticks.get()) {
+                    interval.end_ticks = Some(DecimalU128(end));
+                    interval.meeting_end_ms = Some(meeting_ms_from_ticks(&origin, end));
+                }
             }
         }
         for gap in &mut manifest.pause_intervals {
@@ -340,6 +354,29 @@ pub fn close_interrupted_session(
     Ok(manifest)
 }
 
+/// Segment whose timing the frames starting at `first_sample_index` continue: the source's last mapped
+/// segment, or the source start when nothing is mapped yet. Anchoring every recovered file at the
+/// source start would stack it on top of the chunks that precede it.
+fn continuation_anchor(source: &SourceRecord, first_sample_index: u64) -> SourceSegment {
+    source.sample_map.last().copied().unwrap_or(SourceSegment {
+        first_sample_index,
+        first_sample_ticks: source.started_at_ticks.get(),
+        sample_count: 0,
+    })
+}
+
+/// Tick just past the last sample of the source's last mapped segment.
+fn mapped_end_ticks(source: &SourceRecord, origin: &TimelineOrigin) -> Option<u128> {
+    let last = source.sample_map.last()?;
+    let end = sample_ticks(
+        origin,
+        source.sample_rate_hz,
+        last,
+        i128::try_from(last.end_sample_index()).unwrap_or(0),
+    );
+    u128::try_from(end).ok()
+}
+
 fn origin_of(manifest: &RecorderManifest) -> TimelineOrigin {
     TimelineOrigin {
         origin_ticks: manifest.timeline.origin_ticks.get(),
@@ -349,7 +386,6 @@ fn origin_of(manifest: &RecorderManifest) -> TimelineOrigin {
 
 #[must_use]
 fn last_durable_end_ms(manifest: &RecorderManifest) -> u64 {
-    let origin = origin_of(manifest);
     let from_chunks = manifest.chunks.iter().map(|chunk| chunk.meeting_end_ms).max().unwrap_or(0);
     let from_intervals = manifest
         .active_intervals
@@ -449,24 +485,17 @@ fn adopt_orphan_chunks(
             }
             let first_sample_index = source.last_sample_index_exclusive.max(source.first_sample_index);
             let segment_index = source.sample_map.len() as u32;
+            let anchor = continuation_anchor(&source, first_sample_index);
             let first_tick = sample_ticks(
                 &origin,
                 source.sample_rate_hz,
-                &crate::timeline::SourceSegment {
-                    first_sample_index,
-                    first_sample_ticks: source.started_at_ticks.get(),
-                    sample_count: 1,
-                },
+                &anchor,
                 i128::try_from(first_sample_index).unwrap_or(0),
             );
             let end_ticks = sample_ticks(
                 &origin,
                 source.sample_rate_hz,
-                &crate::timeline::SourceSegment {
-                    first_sample_index,
-                    first_sample_ticks: source.started_at_ticks.get(),
-                    sample_count: frames + 1,
-                },
+                &anchor,
                 i128::try_from(first_sample_index + frames).unwrap_or(0),
             );
             let digest = sha256_of(&bytes);
@@ -511,13 +540,16 @@ fn adopt_orphan_chunks(
                 verified_at: None,
                 storage_key: None,
             });
-            manifest
-                .sources
-                .iter_mut()
-                .find(|candidate| candidate.kind == kind)
-                .map(|candidate| {
-                    candidate.last_sample_index_exclusive = candidate.last_sample_index_exclusive.max(first_sample_index + frames);
+            if let Some(candidate) = manifest.sources.iter_mut().find(|candidate| candidate.kind == kind) {
+                // The adopted frames become a mapped segment, so the sample map keeps agreeing with
+                // `lastSampleIndexExclusive`.
+                candidate.last_sample_index_exclusive = candidate.last_sample_index_exclusive.max(first_sample_index + frames);
+                candidate.sample_map.push(SourceSegment {
+                    first_sample_index,
+                    first_sample_ticks: u128::try_from(first_tick).unwrap_or(0),
+                    sample_count: frames,
                 });
+            }
             warnings.push(format!(
                 "{}: adopted orphaned chunk from disk ({} frames) and recorded it as reconciledFromDisk",
                 relative.display(),
@@ -582,11 +614,7 @@ fn salvage_partial_files(
             let frames = parsed.present_frames;
             let origin = origin_of(manifest);
             let first_sample_index = source.last_sample_index_exclusive.max(source.first_sample_index);
-            let segment = crate::timeline::SourceSegment {
-                first_sample_index,
-                first_sample_ticks: source.started_at_ticks.get(),
-                sample_count: frames + 1,
-            };
+            let segment = continuation_anchor(&source, first_sample_index);
             let first_tick = sample_ticks(
                 &origin,
                 source.sample_rate_hz,
@@ -600,17 +628,11 @@ fn salvage_partial_files(
                 i128::try_from(first_sample_index + frames).unwrap_or(0),
             );
             // Rename in place so the artifact is clearly not a finalized chunk, then record it.
-            let salvaged_name = format!("{sequence_no:06}-truncated.wav");
-            let salvaged_path = path
-                .parent()
-                .map(|parent| parent.join(&salvaged_name))
-                .ok_or_else(|| RecorderError::new(RecorderErrorCode::InternalError, "unexpected partial path", false))?;
+            let relative = PathBuf::from(salvaged_chunk_file_name(kind, sequence_no));
+            let salvaged_path = join_within(session_dir, &relative)
+                .map_err(|_| RecorderError::new(RecorderErrorCode::InternalError, "unexpected partial path", false))?;
             std::fs::rename(&path, &salvaged_path)?;
             set_private_file(&salvaged_path)?;
-            let relative = salvaged_path
-                .strip_prefix(session_dir)
-                .unwrap_or(Path::new("?"))
-                .to_path_buf();
             let digest = sha256_of(&std::fs::read(&salvaged_path)?);
             manifest.chunks.push(ChunkRecord {
                 chunk_id: uuid::Uuid::new_v4().to_string(),
@@ -831,7 +853,7 @@ mod tests {
             999_999,
         );
         let mut bytes = header.to_vec();
-        bytes.extend_from_slice(&vec![0i16; 4_800 * 2]);
+        bytes.extend_from_slice(&vec![0u8; 4_800 * 2 * 2]);
         std::fs::write(dir.join("system-audio/000000.wav.partial"), &bytes).expect("partial");
         // An empty shell.
         std::fs::write(dir.join("microphone/000009.wav.partial"), &header[..]).expect("empty partial");
@@ -905,7 +927,7 @@ mod tests {
     #[test]
     fn stray_directories_are_reported_not_deleted() {
         let (_guard, root) = temp_root("stray");
-        std::fs::create_dir(root.sessions_dir().join("not-a-session")).expect("stray");
+        std::fs::create_dir_all(root.sessions_dir().join("not-a-session")).expect("stray");
         let report = scan_and_reconcile(&root, "2026-10-06T11:00:00Z", true).expect("scan");
         assert_eq!(report.rejected.len(), 1);
         assert!(root.sessions_dir().join("not-a-session").exists());
@@ -941,6 +963,24 @@ mod tests {
         let report = scan_and_reconcile(&root, "2026-10-06T11:00:00Z", true).expect("scan");
         assert!(report.has_interrupted());
         assert_eq!(report.sessions.len(), 2);
+    }
+
+    #[test]
+    fn closing_an_interrupted_session_produces_a_valid_stopped_manifest() {
+        let (_guard, root) = temp_root("close");
+        let manifest = valid_manifest();
+        let dir = session(&root, &manifest);
+        let closed = close_interrupted_session(&dir, None, None).expect("a crashed session can be closed");
+        assert_eq!(closed.state, ManifestState::Stopped);
+        assert_eq!(closed.revision, manifest.revision + 1);
+        for source in &closed.sources {
+            let ended = source.ended_at_ticks.expect("ended at the last mapped sample").get();
+            assert!(ended > source.started_at_ticks.get());
+        }
+        assert!(closed.active_intervals.iter().all(|interval| interval.end_ticks.is_some()));
+        let persisted = std::fs::read_to_string(dir.join("manifest.json")).expect("read");
+        RecorderManifest::parse_and_validate(&persisted).expect("persisted manifest is valid");
+        assert_eq!(close_interrupted_session(&dir, None, None).expect("idempotent").revision, closed.revision);
     }
 
     #[test]

@@ -21,12 +21,12 @@ pub struct WavFormat {
 impl WavFormat {
     #[must_use]
     pub const fn bytes_per_frame(self) -> u64 {
-        u64::from(self.channels) * u64::from(BITS_PER_SAMPLE / 8)
+        self.channels as u64 * (BITS_PER_SAMPLE / 8) as u64
     }
 
     #[must_use]
     pub const fn bytes_per_second(self) -> u64 {
-        u64::from(self.sample_rate_hz) * self.bytes_per_frame()
+        self.sample_rate_hz as u64 * self.bytes_per_frame()
     }
 }
 

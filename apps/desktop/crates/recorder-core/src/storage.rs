@@ -35,7 +35,7 @@ pub const DISK_SAFETY_FACTOR_DENOMINATOR: u64 = 2;
 /// `sample_rate_hz * channels * bytes_per_sample`, the steady-state byte rate of one source.
 #[must_use]
 pub const fn bytes_per_second(sample_rate_hz: u32, channels: u16, bytes_per_sample: u64) -> u64 {
-    u64::from(sample_rate_hz) * u64::from(channels) * bytes_per_sample
+    sample_rate_hz as u64 * channels as u64 * bytes_per_sample
 }
 
 /// Projected bytes for `duration_seconds` of capture across the given sources, with the safety margin.
@@ -232,7 +232,7 @@ pub fn set_private_file(path: &Path) -> Result<(), RecorderError> {
 }
 
 /// Flush and `fsync` a file handle. Windows `FlushFileBuffers` is handled by the same std call.
-pub fn sync_file(file: &File) -> Result<(), RecorderError> {
+pub fn sync_file(mut file: &File) -> Result<(), RecorderError> {
     file.flush()?;
     file.sync_all()?;
     Ok(())
@@ -266,7 +266,7 @@ pub fn available_bytes(path: &Path) -> Result<u64, RecorderError> {
     // SAFETY: `statfs` returned success, so the structure is initialised.
     let stat = unsafe { stat.assume_init() };
     let block_size = u64::try_from(stat.f_bsize).map_err(|_| capacity_error())?;
-    Ok(stat.f_bavail.saturating_mul(i64::try_from(block_size).map_err(|_| capacity_error())?) as u64)
+    Ok(stat.f_bavail.saturating_mul(block_size))
 }
 
 /// Non-macOS development fallback (Linux test hosts); `statvfs` has the same fields.
@@ -284,7 +284,7 @@ pub fn available_bytes(path: &Path) -> Result<u64, RecorderError> {
     // SAFETY: `statvfs` returned success.
     let stat = unsafe { stat.assume_init() };
     let block_size = u64::try_from(stat.f_frsize).map_err(|_| capacity_error())?;
-    Ok(stat.f_bavail.saturating_mul(i64::try_from(block_size).map_err(|_| capacity_error())?) as u64)
+    Ok(stat.f_bavail.saturating_mul(block_size))
 }
 
 #[cfg(windows)]
@@ -776,7 +776,7 @@ mod tests {
         assert_eq!(bound.byte_size, 4_000_000);
         assert_eq!(bound.checksum.as_ref().map(|value| value.value.len()), Some(64));
         assert!(bind_finalized_chunk(chunk, 10, "a".repeat(64)).is_err(), "too small");
-        assert!(bind_finalized_chunk(chunk, 4_000_000, "nothex").is_err(), "bad digest");
+        assert!(bind_finalized_chunk(chunk, 4_000_000, "nothex".to_string()).is_err(), "bad digest");
     }
 
     #[test]

@@ -178,6 +178,6 @@ mod tests {
         assert_eq!(json["systemAudio"], "permission_unknown");
         assert_eq!(json["availability"], "unsupported_os_version");
         assert_eq!(json["openSettingsSupported"], false);
-        assert!(json.get("minimumMacOSVersion").is_some());
+        assert!(json.get("minimumMacosVersion").is_some());
     }
 }

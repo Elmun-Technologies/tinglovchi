@@ -135,10 +135,16 @@ pub fn can_transition(from: RecorderState, to: RecorderState) -> bool {
 
 /// The mutable capture state plus an audit log of rejected attempts, so a misbehaving caller is
 /// visible rather than silently ignored.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct StateMachine {
     state: RecorderState,
     rejected_attempts: Vec<(RecorderState, RecorderState)>,
+}
+
+impl Default for StateMachine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StateMachine {

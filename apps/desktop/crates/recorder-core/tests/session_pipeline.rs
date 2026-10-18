@@ -126,10 +126,27 @@ fn feed(
     for second in 0..seconds {
         let index = (start_index_s + second) * u64::from(DEFAULT_SAMPLE_RATE_HZ);
         let tick = tick_of(index) + base;
-        for source in backend.all_sources() {
-            push_block(&source, index, tick);
+        let sources = backend.all_sources();
+        for source in &sources {
+            push_block(source, index, tick);
         }
-        recorder.pump().expect("pump");
+        // Pace the harness to the writer: a block the bounded queue refuses is counted as lost audio,
+        // so pushing faster than real time (easily done in a debug build) would fabricate overflows.
+        let end = index + BATCH_FRAMES as u64;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            let status = recorder.pump().expect("pump");
+            let written = sources.iter().all(|source| {
+                status
+                    .sources
+                    .iter()
+                    .any(|record| record.kind == source.kind && record.last_sample_index_exclusive >= end)
+            });
+            if written || std::time::Instant::now() > deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         clock.advance_ns(TICK_NS);
     }
 }
@@ -331,7 +348,9 @@ fn pause_and_resume_leave_a_silent_gap_in_the_canonical_timeline() {
     recorder.start(&start_request(CHUNK_MS)).expect("start");
 
     feed(&mut recorder, &harness.backend, &harness.clock, 30, 0, 0);
-    let at_pause = wait_for_chunks(&mut recorder, 2);
+    // Chunk 0 is still open here (a chunk closes when the next block crosses its boundary, or on the
+    // pause flush below), so there is nothing to wait for; waiting for 2 chunks only ran into the deadline.
+    let at_pause = recorder.pump().expect("pump");
     assert_eq!(at_pause.canonical_elapsed_ms, 30_000);
     let status = recorder.pause().expect("pause");
     assert_eq!(status.state, RecorderState::Paused);
@@ -378,8 +397,8 @@ fn pause_and_resume_leave_a_silent_gap_in_the_canonical_timeline() {
     assert_eq!(mic.last_sample_index_exclusive, SAMPLES_PER_CHUNK + 480_000);
     assert_eq!(
         mic.last_sample_meeting_ms,
-        Some(340_000),
-        "canonical meeting time of the last sample, not elapsed-since-resume"
+        Some(339_999),
+        "canonical meeting time of the last sample (index 1_919_999), not elapsed-since-resume"
     );
     assert_eq!(mic.first_sample_meeting_ms, 0);
 
@@ -429,9 +448,10 @@ fn pause_and_resume_leave_a_silent_gap_in_the_canonical_timeline() {
     let total_audio_ms: u64 = manifest
         .chunks
         .iter()
+        .filter(|chunk| chunk.source_kind == SourceKind::Microphone)
         .map(|chunk| chunk.meeting_end_ms - chunk.meeting_start_ms)
         .sum();
-    assert_eq!(total_audio_ms, 40_000, "40 s of audio in a 340 s meeting");
+    assert_eq!(total_audio_ms, 40_000, "40 s of microphone audio in a 340 s meeting");
 }
 
 #[test]
@@ -450,7 +470,7 @@ fn markers_and_notes_are_timestamped_persisted_and_independent_of_transcripts() 
     assert!(recorder.add_note("   ").is_err(), "blank notes are refused");
 
     recorder.pause().expect("pause");
-    harness.clock.advance_ns(5 * TICK_NS / 1_000);
+    harness.clock.advance_ns(5 * TICK_NS);
     let paused_marker = recorder.mark_important(Some("Question for follow-up")).expect("marker while paused");
     assert_eq!(paused_marker.meeting_ms, 66_000, "canonical time, not captured time");
     recorder.resume().expect("resume");
@@ -543,7 +563,19 @@ fn queue_overflow_counts_lost_audio_degrades_the_source_and_opens_a_new_segment(
     // Device-side loss: the bridge reports it, the recorder must not interpolate across the hole.
     mic.report_overflow(9_600);
     push_block(&mic, 48_000, tick_of(48_000));
-    let status = recorder.pump().expect("pump");
+    // The writer reports the loss asynchronously; pump until it has been applied.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let status = loop {
+        let status = recorder.pump().expect("pump");
+        let degraded = status
+            .sources
+            .iter()
+            .any(|source| source.kind == SourceKind::Microphone && source.state == SourceHealth::Degraded);
+        if degraded || std::time::Instant::now() > deadline {
+            break status;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
     let mic_status = status
         .sources
         .iter()
@@ -726,7 +758,7 @@ fn a_crash_leaves_a_recoverable_session_that_startup_reconciliation_reports() {
     feed(&mut recorder, &harness.backend, &harness.clock, 35, 0, 0);
     recorder.mark_important(Some("Decision")).expect("marker");
     let dir = recorder.session_dir().expect("dir").to_path_buf();
-    wait_for_chunks(&mut recorder, 1);
+    wait_for_chunks(&mut recorder, 2);
     // Simulate a hard kill: drop the coordinator without `stop()`, so the manifest still says
     // `recording` and the open chunk was never finalized.
     drop(recorder);
@@ -749,7 +781,9 @@ fn a_crash_leaves_a_recoverable_session_that_startup_reconciliation_reports() {
     assert!(session.interrupted);
     assert!(session.recoverable());
     assert!(!session.can_resume_capture, "capture is never resumed into an old session");
-    assert_eq!(session.durable_chunk_count, 2);
+    // The two finalized chunks, plus the open chunk of each source salvaged from its `.partial`.
+    assert_eq!(session.salvaged_chunks, 2, "{session:?}");
+    assert_eq!(session.durable_chunk_count, 2 + session.salvaged_chunks);
     assert_eq!(session.marker_count, 1);
     assert!(report.has_interrupted());
 
@@ -757,7 +791,10 @@ fn a_crash_leaves_a_recoverable_session_that_startup_reconciliation_reports() {
     assert_eq!(reconciled.state, ManifestState::Interrupted);
     assert!(reconciled.revision > crashed.revision, "reconciliation is itself a durable revision");
     assert_eq!(reconciled.markers.len(), 1, "nothing is discarded");
-    assert_eq!(reconciled.chunks.len(), crashed.chunks.len());
+    assert_eq!(reconciled.chunks.len(), crashed.chunks.len() + 2, "finalized chunks kept, partials salvaged");
+    for chunk in &crashed.chunks {
+        assert!(reconciled.chunks.contains(chunk), "finalized chunks are kept unchanged");
+    }
     for chunk in reconciled.chunks.iter().filter(|chunk| chunk.state.is_durable()) {
         let bytes = std::fs::read(dir.join(&chunk.local_file)).unwrap_or_else(|error| panic!("{}: {error}", chunk.local_file));
         assert_eq!(u64::try_from(bytes.len()).expect("size"), chunk.byte_size, "recorded size is exact");
@@ -785,13 +822,20 @@ fn every_step_is_durable_and_revisions_increase_monotonically() {
     let harness = Harness::new("revisions");
     let mut recorder = harness.recorder();
     let mut revisions = Vec::new();
-    let mut snapshot = |revisions: &mut Vec<u64>, recorder: &mut Recorder<ScriptedBackend, MockClock>| {
+    let snapshot = |revisions: &mut Vec<u64>, recorder: &mut Recorder<ScriptedBackend, MockClock>| {
         let dir = recorder.session_dir().expect("dir").to_path_buf();
         revisions.push(Harness::manifest_at(&dir).revision);
     };
     recorder.start(&start_request(CHUNK_MS)).expect("start");
     snapshot(&mut revisions, &mut recorder);
     feed(&mut recorder, &harness.backend, &harness.clock, 1, 0, 0);
+    // The writer reports progress asynchronously; the step is durable once that report is persisted.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while recorder.pump().expect("pump").sources.iter().any(|source| source.last_sample_index_exclusive == 0)
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     snapshot(&mut revisions, &mut recorder);
     recorder.pause().expect("pause");
     snapshot(&mut revisions, &mut recorder);

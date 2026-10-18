@@ -62,8 +62,9 @@ pub fn measure_i16(samples: &[i16]) -> LevelSnapshot {
         let normalized = f64::from(sample) / f64::from(i16::MAX);
         squares += normalized * normalized;
     }
-    let peak = f32::from(peak_i) / f32::from(i16::MAX);
-    let rms = (squares / f64::from(samples.len())).sqrt() as f32;
+    // `i16::MIN` has one more unit of magnitude than `i16::MAX`; full scale is still 1.0.
+    let peak = (peak_i as f32 / f32::from(i16::MAX)).min(1.0);
+    let rms = ((squares / samples.len() as f64).sqrt() as f32).min(1.0);
     LevelSnapshot {
         peak,
         rms,

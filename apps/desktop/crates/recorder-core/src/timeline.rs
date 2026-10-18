@@ -32,11 +32,11 @@ pub fn floor_div(numerator: i128, denominator: i128) -> i128 {
     }
 }
 
-/// Ceiled integer division.
+/// Ceiled integer division (rounds toward plus infinity).
 pub fn ceil_div(numerator: i128, denominator: i128) -> i128 {
     assert_ne!(denominator, 0, "timeline: division by zero frequency or sample rate");
     let quotient = numerator / denominator;
-    if numerator % denominator != 0 && (numerator < 0) != (denominator < 0) {
+    if numerator % denominator != 0 && (numerator < 0) == (denominator < 0) {
         quotient + 1
     } else {
         quotient
@@ -64,6 +64,7 @@ impl TimelineOrigin {
 /// `JSON.parse`, and tick readings are never used for arithmetic in the renderer, so the string form is
 /// the wire contract for every raw tick (docs/recording.md §4).
 mod decimal_ticks {
+    use serde::de::Error as _;
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(value: &u128, serializer: S) -> Result<S::Ok, S::Error> {
@@ -377,7 +378,7 @@ pub enum GapReason {
 }
 
 /// Input for reconstructing a gap across a restart. Never claim sample-level audio inside it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct EpochBridgeInput {
     pub origin_epoch_id: String,
     pub previous_epoch_id: String,
@@ -604,6 +605,6 @@ mod tests {
             first_sample_ticks: origin.origin_ticks,
             sample_count: 10,
         };
-        sample_ticks(&origin, 0, &segment, 1);
+        let _ = sample_ticks(&origin, 0, &segment, 1);
     }
 }

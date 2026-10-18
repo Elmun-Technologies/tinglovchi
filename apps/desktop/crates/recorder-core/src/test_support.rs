@@ -14,9 +14,19 @@ use crate::session::DEFAULT_SAMPLE_RATE_HZ;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// A constant-amplitude block of `frames` interleaved frames for a source with `channels` channels.
+#[must_use]
+pub fn block(first_sample_index: u64, first_tick: u128, frames: usize, channels: u16, value: i16) -> AudioBlock {
+    AudioBlock {
+        first_sample_index,
+        first_tick,
+        samples: vec![value; frames * usize::from(channels)],
+        discontinuity: false,
+    }
+}
+
 /// A scripted source: a test pushes blocks through the callback the coordinator installed, exactly as
 /// a native bridge would.
-#[derive(Debug)]
 pub struct ScriptedSource {
     pub kind: SourceKind,
     pub sample_rate_hz: u32,
@@ -26,6 +36,19 @@ pub struct ScriptedSource {
     pub actual_sample_rate_hz: Option<u32>,
     callback: Mutex<Option<Arc<dyn CaptureCallback>>>,
     state: Mutex<StreamState>,
+}
+
+impl std::fmt::Debug for ScriptedSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ScriptedSource")
+            .field("kind", &self.kind)
+            .field("sample_rate_hz", &self.sample_rate_hz)
+            .field("channels", &self.channels)
+            .field("actual_sample_rate_hz", &self.actual_sample_rate_hz)
+            .field("state", &self.state)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ScriptedSource {
@@ -57,12 +80,7 @@ impl ScriptedSource {
 
     /// Deliver `frames` samples of constant amplitude starting at `first_sample_index`.
     pub fn push_frames(&self, first_sample_index: u64, first_tick: u128, frames: usize, value: i16) -> bool {
-        self.push(AudioBlock {
-            first_sample_index,
-            first_tick,
-            samples: vec![value; frames * usize::from(self.channels)],
-            discontinuity: false,
-        })
+        self.push(block(first_sample_index, first_tick, frames, self.channels, value))
     }
 
     /// Report that the backend itself had to drop samples.

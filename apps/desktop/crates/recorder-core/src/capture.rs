@@ -192,6 +192,18 @@ pub struct BoundedBlockQueue {
     closed: AtomicBool,
 }
 
+impl std::fmt::Debug for BoundedBlockQueue {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BoundedBlockQueue")
+            .field("capacity_blocks", &self.capacity_blocks)
+            .field("capacity_bytes", &self.capacity_bytes)
+            .field("pending_blocks", &self.pending_blocks())
+            .field("closed", &self.is_closed())
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Default)]
 struct QueueState {
     blocks: std::collections::VecDeque<AudioBlock>,
@@ -205,7 +217,8 @@ impl BoundedBlockQueue {
             inner: Mutex::new(QueueState::default()),
             not_empty: Condvar::new(),
             capacity_blocks: capacity_blocks.max(1),
-            capacity_bytes: capacity_bytes.max(4096),
+            // Never below one sample, so a block can always be accepted; otherwise the caller's budget holds.
+            capacity_bytes: capacity_bytes.max(std::mem::size_of::<i16>()),
             dropped_samples: AtomicU64::new(0),
             closed: AtomicBool::new(false),
         }
@@ -369,8 +382,8 @@ mod tests {
     #[test]
     fn byte_budget_also_bounds_the_queue() {
         let queue = Arc::new(BoundedBlockQueue::new(100, 256));
-        assert!(queue.try_push(block(0, 64)));
-        assert!(!queue.try_push(block(64, 64)), "256 bytes holds exactly 64 samples");
+        assert!(queue.try_push(block(0, 128)), "256 bytes holds exactly 128 samples");
+        assert!(!queue.try_push(block(128, 1)), "one more sample exceeds the byte budget");
     }
 
     #[test]
@@ -422,7 +435,8 @@ mod tests {
                 },
                 Arc::new(QueueCallback::new(Arc::new(BoundedBlockQueue::new(1, 1024)))),
             )
-            .expect_err("no capture may silently proceed");
+            .err()
+            .expect("no capture may silently proceed");
         assert_eq!(error.code, RecorderErrorCode::PlatformUnsupported);
         assert!(matches!(
             backend.devices(SourceKind::Microphone),

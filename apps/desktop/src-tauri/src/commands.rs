@@ -31,8 +31,8 @@ fn command<T>(
 ) -> Result<T, Failure> {
     let (value, events) = {
         let mut guard = lock(&state.recorder);
-        let value = run(&mut guard.recorder)?;
-        (value, guard.recorder.take_events())
+        let value = run(&mut guard)?;
+        (value, guard.take_events())
     };
     state::emit_events(app, events);
     Ok(value)
@@ -232,7 +232,6 @@ pub fn recorder_read_chunk_bytes(
 ) -> Result<String, Failure> {
     let guard = crate::error::lock(&state.recorder);
     let session_dir = guard
-        .recorder
         .session_dir()
         .map(std::path::Path::to_path_buf)
         .ok_or_else(|| {

@@ -29,8 +29,7 @@ pub const MIN_CHUNK_BYTES: u64 = 44;
 
 /// Tick values and sample counts exceed JSON's safe integer range, so they travel as decimal
 /// strings. A JSON number here is a hard deserialization error instead of silent precision loss.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct DecimalU128(pub u128);
 
 impl DecimalU128 {
@@ -48,15 +47,28 @@ impl Serialize for DecimalU128 {
 
 impl<'de> Deserialize<'de> for DecimalU128 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let text = String::deserialize(deserializer)?;
+        deserializer.deserialize_str(DecimalU128Visitor)
+    }
+}
+
+/// Accepts only strings; any other JSON type (notably a number) is reported against the same
+/// "unsigned decimal integer string" expectation.
+struct DecimalU128Visitor;
+
+impl serde::de::Visitor<'_> for DecimalU128Visitor {
+    type Value = DecimalU128;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("an unsigned decimal integer string")
+    }
+
+    fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
         if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(serde::de::Error::custom(format!(
+            return Err(E::custom(format!(
                 "expected an unsigned decimal integer string, got {text:?}"
             )));
         }
-        text.parse::<u128>()
-            .map(DecimalU128)
-            .map_err(serde::de::Error::custom)
+        text.parse::<u128>().map(DecimalU128).map_err(E::custom)
     }
 }
 
@@ -392,6 +404,12 @@ pub fn chunk_file_name(source_kind: SourceKind, sequence_no: u64, format: Captur
     )
 }
 
+/// Name a salvaged `.partial` file is renamed to, so it can never be mistaken for a finalized chunk.
+#[must_use]
+pub fn salvaged_chunk_file_name(source_kind: SourceKind, sequence_no: u64) -> String {
+    format!("{}/{:06}-truncated.wav", source_kind.directory_name(), sequence_no)
+}
+
 #[must_use]
 pub fn partial_file_name(source_kind: SourceKind, sequence_no: u64, format: CaptureFormat) -> String {
     format!("{}.partial", chunk_file_name(source_kind, sequence_no, format))
@@ -608,12 +626,17 @@ impl RecorderManifest {
                 return Err(conflict("sources[] sample index range is inverted"));
             }
             if let Some(ended) = source.ended_at_ticks {
-                if ended.get() <= source.started_at_ticks.get() {
-                    return Err(conflict("sources[].endedAtTicks must be after startedAtTicks"));
+                // A source can fail at the very tick it was started, so equality is allowed.
+                if ended.get() < source.started_at_ticks.get() {
+                    return Err(conflict("sources[].endedAtTicks must not precede startedAtTicks"));
                 }
             }
+            // A source that has not delivered a sample yet (a session just started) has nothing to map.
             if source.sample_map.is_empty() {
-                return Err(conflict("sources[].sampleMap must contain the delivered segments"));
+                if source.last_sample_index_exclusive != source.first_sample_index {
+                    return Err(conflict("sources[].sampleMap must contain the delivered segments"));
+                }
+                continue;
             }
             let mut previous_end: u64 = 0;
             for segment in &source.sample_map {
@@ -679,7 +702,12 @@ impl RecorderManifest {
             if chunk.codec != Codec::PcmS16Le || chunk.container != Container::Wav {
                 return Err(conflict("chunk codec/container must match the implemented capture format"));
             }
-            if chunk.local_file != chunk_file_name(chunk.source_kind, chunk.sequence_no, CaptureFormat::WavPcmS16Le) {
+            let expected_file = if chunk.state == ChunkState::SalvagedTruncated {
+                salvaged_chunk_file_name(chunk.source_kind, chunk.sequence_no)
+            } else {
+                chunk_file_name(chunk.source_kind, chunk.sequence_no, CaptureFormat::WavPcmS16Le)
+            };
+            if chunk.local_file != expected_file {
                 return Err(conflict("chunk localFile must be the deterministic session-relative path for its sequence"));
             }
             if chunk.byte_size < MIN_CHUNK_BYTES {
@@ -738,15 +766,17 @@ impl RecorderManifest {
 
         let mut open_intervals = 0usize;
         for interval in &self.active_intervals {
+            // Equality is a real (if instant) interval, e.g. stop right after resume; and meeting
+            // milliseconds are floored, so an interval shorter than 1 ms has equal ms bounds.
             if let Some(end) = interval.end_ticks {
-                if end.get() <= interval.start_ticks.get() {
-                    return Err(conflict("activeIntervals must end after they start"));
+                if end.get() < interval.start_ticks.get() {
+                    return Err(conflict("activeIntervals must not end before they start"));
                 }
             } else {
                 open_intervals += 1;
             }
             if let Some(end_ms) = interval.meeting_end_ms {
-                if end_ms <= interval.meeting_start_ms {
+                if end_ms < interval.meeting_start_ms {
                     return Err(conflict("activeIntervals meeting range is inverted"));
                 }
             }
@@ -755,8 +785,10 @@ impl RecorderManifest {
             return Err(conflict("at most one active interval may be open"));
         }
         for gap in &self.pause_intervals {
-            if gap.meeting_end_ms <= gap.meeting_start_ms {
-                return Err(conflict("pauseIntervals must be non-empty half-open ranges"));
+            // `meetingEndMs == meetingStartMs` is how the coordinator records a gap that is still open
+            // (a pause not yet resumed, a source that stopped for good); only an inverted range is invalid.
+            if gap.meeting_end_ms < gap.meeting_start_ms {
+                return Err(conflict("pauseIntervals must not end before they start"));
             }
         }
 
@@ -1067,7 +1099,9 @@ mod tests {
     #[test]
     fn duration_must_come_from_sample_count_not_the_meeting_interval() {
         let mut manifest = valid_manifest();
-        manifest.chunks[0].duration_ms = manifest.chunks[0].meeting_end_ms - manifest.chunks[0].meeting_start_ms;
+        // The system-audio chunk's meeting interval (35..30000) is not its frame duration (29980 ms).
+        manifest.chunks[1].duration_ms = manifest.chunks[1].meeting_end_ms - manifest.chunks[1].meeting_start_ms;
+        assert_ne!(manifest.chunks[1].duration_ms, TEST_SAMPLES * 1_000 / 48_000);
         let error = manifest.validate().expect_err("durationMs is frame arithmetic only");
         assert!(error.message.contains("durationMs"));
     }
@@ -1081,7 +1115,14 @@ mod tests {
         assert!(manifest.validate().is_err(), "duplicate sequence for one source");
 
         let mut manifest = valid_manifest();
-        manifest.chunks[0].meeting_end_ms = 60_000;
+        let mut next = manifest.chunks[0].clone();
+        next.chunk_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd".into();
+        next.sequence_no = 1;
+        next.idempotency_key = idempotency_key(&next.recording_id, &next.recording_source_id, 1);
+        next.local_file = chunk_file_name(next.source_kind, 1, CaptureFormat::WavPcmS16Le);
+        next.meeting_start_ms = manifest.chunks[0].meeting_end_ms - 1_000;
+        next.meeting_end_ms = 60_000;
+        manifest.chunks.push(next);
         assert!(manifest.validate().is_err(), "overlapping chunk intervals");
     }
 
@@ -1114,8 +1155,9 @@ mod tests {
     fn big_integers_are_decimal_strings_and_not_json_numbers() {
         let json = serde_json::to_value(valid_manifest()).expect("serializable");
         assert!(json["timeline"]["originTicks"].is_string());
-        assert!(json["chunks"][0]["sampleCount"].is_string());
-        assert!(json["sources"][0]["droppedSampleCount"].is_string());
+        // Sample counts stay JSON numbers: they never approach 2^53 (packages/contracts/src/recorder.ts).
+        assert!(json["chunks"][0]["sampleCount"].is_u64());
+        assert!(json["sources"][0]["droppedSampleCount"].is_u64());
         let mut object = json.as_object().expect("manifest object").clone();
         object.insert(
             "timeline".into(),
@@ -1124,7 +1166,7 @@ mod tests {
                 "clockEpochId": "boot-1",
                 "originTicks": 9_007_199_254_740_993u64,
                 "originWallClockUtc": "2026-10-06T10:00:00Z",
-                "tickFrequencyHz": "1000000000"
+                "tickFrequencyHz": 1_000_000_000
             }),
         );
         let error = serde_json::from_str::<RecorderManifest>(&serde_json::to_string(&object).expect("string"))

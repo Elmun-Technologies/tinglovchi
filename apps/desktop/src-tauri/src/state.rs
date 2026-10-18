@@ -15,6 +15,7 @@ use recorder_core::storage::RecorderRoot;
 use serde::Serialize;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager};
 
 pub const EVENT_NAME: &str = "recorder://event";
 
@@ -143,7 +144,6 @@ fn event_payload(event: &RecorderEvent) -> Option<serde_json::Value> {
 }
 
 fn emit_payload(app: &tauri::AppHandle, payload: serde_json::Value) {
-    use tauri::Emitter;
     // `serde_json::Value` is `Clone + Serialize`, which is all `emit` requires.
     let _ = app.emit(EVENT_NAME, &payload);
 }
@@ -156,10 +156,10 @@ fn emit_payload(app: &tauri::AppHandle, payload: serde_json::Value) {
 pub fn is_capturing(state: &AppState) -> bool {
     let guard = crate::error::lock(&state.recorder);
     matches!(
-        guard.recorder.state(),
-        recorder_core::session::RecorderState::Recording
-            | recorder_core::session::RecorderState::Paused
-            | recorder_core::session::RecorderState::Finalizing
+        guard.state(),
+        recorder_core::RecorderState::Recording
+            | recorder_core::RecorderState::Paused
+            | recorder_core::RecorderState::Finalizing
     )
 }
 
@@ -173,7 +173,7 @@ pub fn emit_close_requested(app: &tauri::AppHandle) {
 /// coordinator keeps in sync with the durable file after every revision).
 pub fn current_manifest(state: &AppState) -> Option<RecorderManifest> {
     let guard = crate::error::lock(&state.recorder);
-    guard.recorder.manifest().cloned()
+    guard.manifest().cloned()
 }
 
 #[must_use]

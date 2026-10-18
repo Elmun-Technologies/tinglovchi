@@ -9,7 +9,8 @@
 //!   evidence or shift the timeline.
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU128, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Nanosecond-resolution monotonic clock used by the recorder.
@@ -24,9 +25,9 @@ pub trait Clock: Send + Sync {
     /// Milliseconds since the Unix epoch, for persisted metadata only.
     fn wall_clock_ms(&self) -> u64;
 
-    /// RFC 3339 UTC timestamp of the wall clock at `millis`.
+    /// RFC 3339 UTC timestamp of the wall clock at `millis`, with second precision.
     fn wall_clock_rfc3339(&self, millis: u64) -> String {
-        rfc3339_from_unix_millis(millis)
+        rfc3339_from_unix_millis(millis - millis % 1_000)
     }
 }
 
@@ -138,8 +139,9 @@ fn posix_clock(clock_id: libc::clockid_t) -> (u64, u32) {
 /// Clock the tests drive by hand: no sleeping, no floating point, exact expected numbers.
 #[derive(Debug, Default)]
 pub struct MockClock {
-    ticks: AtomicU128,
-    wall_ms: AtomicU128,
+    // `AtomicU128` is not stable, so the 128-bit tick counter sits behind a mutex.
+    ticks: Mutex<u128>,
+    wall_ms: AtomicU64,
     epoch: String,
 }
 
@@ -147,21 +149,23 @@ impl MockClock {
     #[must_use]
     pub fn new(start_ticks: u128, start_wall_ms: u64) -> Self {
         Self {
-            ticks: AtomicU128::new(start_ticks),
-            wall_ms: AtomicU128::new(u128::from(start_wall_ms)),
+            ticks: Mutex::new(start_ticks),
+            wall_ms: AtomicU64::new(start_wall_ms),
             epoch: "boot-mock".into(),
         }
     }
 
     /// Advance the monotonic clock by `nanos` (and wall time with it, as a real clock would).
     pub fn advance_ns(&self, nanos: u128) {
-        self.ticks.fetch_add(nanos, Ordering::Relaxed);
-        self.wall_ms.fetch_add(nanos / 1_000_000, Ordering::Relaxed);
+        let mut ticks = self.ticks.lock().unwrap_or_else(PoisonError::into_inner);
+        *ticks = ticks.saturating_add(nanos);
+        let millis = u64::try_from(nanos / 1_000_000).unwrap_or(u64::MAX);
+        self.wall_ms.fetch_add(millis, Ordering::Relaxed);
     }
 
     /// Simulate a wall-clock-only jump (sleep, NTP step): the monotonic clock does not move.
     pub fn advance_wall_only_ms(&self, millis: u64) {
-        self.wall_ms.fetch_add(u128::from(millis), Ordering::Relaxed);
+        self.wall_ms.fetch_add(millis, Ordering::Relaxed);
     }
 
     /// Pretend the process was started in a different monotonic epoch (simulates a reboot).
@@ -174,7 +178,7 @@ impl MockClock {
 
 impl Clock for MockClock {
     fn monotonic_ticks(&self) -> u128 {
-        self.ticks.load(Ordering::Relaxed)
+        *self.ticks.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn epoch_id(&self) -> String {
@@ -182,14 +186,15 @@ impl Clock for MockClock {
     }
 
     fn wall_clock_ms(&self) -> u64 {
-        u64::try_from(self.wall_ms.load(Ordering::Relaxed)).unwrap_or(0)
+        self.wall_ms.load(Ordering::Relaxed)
     }
 }
 
 /// Current UTC timestamp, RFC 3339 with second precision.
 #[must_use]
 pub fn now_utc_rfc3339() -> String {
-    rfc3339_from_unix_millis(SystemTime::now().duration_since(UNIX_EPOCH).map(|since| since.as_millis() as u64).unwrap_or(0))
+    let millis = SystemTime::now().duration_since(UNIX_EPOCH).map(|since| since.as_millis() as u64).unwrap_or(0);
+    rfc3339_from_unix_millis(millis - millis % 1_000)
 }
 
 #[must_use]
