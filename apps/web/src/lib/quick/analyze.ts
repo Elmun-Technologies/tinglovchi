@@ -72,9 +72,11 @@ export async function analyzeTranscript(
   const client = new Anthropic();
   let response;
   try {
-    response = await client.beta.messages.parse({
+    // Streamed: a multi-hour transcript can take longer than a non-streaming request is allowed to, and
+    // thinking plus the full analysis of a long meeting needs room beyond 16k output tokens.
+    const stream = client.beta.messages.stream({
       model: analysisModel(),
-      max_tokens: 16000,
+      max_tokens: 64000,
       output_config: { effort: 'high', format: betaZodOutputFormat(analysisSchema) },
       // On a policy decline the API re-runs the request on its default fallback model.
       betas: ['server-side-fallback-2026-07-01'],
@@ -82,6 +84,7 @@ export async function analyzeTranscript(
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: transcriptForPrompt(transcript, stats) }],
     });
+    response = await stream.finalMessage();
   } catch (cause) {
     if (cause instanceof Anthropic.AuthenticationError) {
       throw new AnalysisError('ANTHROPIC_API_KEY noto‘g‘ri.', false);

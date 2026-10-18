@@ -7,8 +7,11 @@ import { formatTimestamp, formatDateTime } from '../../lib/quick/format';
 import {
   deleteLocalRecording,
   listLocalRecordings,
-  saveLocalRecording,
+  loadLocalRecording,
+  saveLocalRecordingMeta,
+  appendLocalChunk,
   type LocalRecording,
+  type LocalRecordingMeta,
 } from '../../lib/quick/local-recordings';
 
 type Phase = 'idle' | 'starting' | 'recording' | 'paused' | 'uploading';
@@ -56,7 +59,7 @@ export function Recorder({ warnings }: { warnings: string[] }) {
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
-  const [pending, setPending] = useState<LocalRecording[]>([]);
+  const [pending, setPending] = useState<LocalRecordingMeta[]>([]);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -193,19 +196,44 @@ export function Recorder({ warnings }: { warnings: string[] }) {
     recordingRef.current = recording;
     recorderRef.current = recorder;
 
+    const meta = (): LocalRecordingMeta => ({
+      id: recording.id,
+      startedAt: recording.startedAt,
+      mimeType: recording.mimeType,
+      recordedMs: recording.recordedMs,
+      chunkCount: recording.chunks.length,
+    });
+    // Writes are chained so pieces land in IndexedDB in order and the final details come last.
+    let saved: Promise<unknown> = Promise.resolve();
     recorder.ondataavailable = (event) => {
       if (event.data.size === 0) return;
       recording.chunks.push(event.data);
       recording.recordedMs = currentElapsed();
-      void saveLocalRecording(recording).catch(() => undefined);
+      const snapshot = meta();
+      saved = saved.then(() => appendLocalChunk(snapshot, event.data)).catch(() => undefined);
     };
     recorder.onstop = () => {
       recording.recordedMs = currentElapsed();
       releaseDevices();
-      void saveLocalRecording(recording)
-        .catch(() => undefined)
-        .then(() => send(recording));
+      const snapshot = meta();
+      saved = saved.then(() => saveLocalRecordingMeta(snapshot)).catch(() => undefined);
+      void saved.then(() => send(recording));
     };
+    // The microphone can be taken away mid-meeting (a phone call, another app, a lost headset). Stop
+    // cleanly so everything recorded until then is uploaded, and say why.
+    stream.getAudioTracks().forEach((track) => {
+      track.onended = () => {
+        if (recorder.state === 'inactive') return;
+        setError(
+          'Mikrofon uzilib qoldi (qo‘ng‘iroq yoki boshqa ilova). Shu paytgacha yozilgani yuborildi.',
+        );
+        const clock = clockRef.current;
+        clock.accumulated = currentElapsed();
+        clock.runningSince = null;
+        setPhase('uploading');
+        recorder.stop();
+      };
+    });
 
     // Level meter.
     try {
@@ -374,7 +402,10 @@ export function Recorder({ warnings }: { warnings: string[] }) {
                 <span className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => void send(recording)}
+                    onClick={async () => {
+                      const stored = await loadLocalRecording(recording.id);
+                      if (stored && stored.chunks.length > 0) await send(stored);
+                    }}
                     className="inline-flex items-center gap-1 rounded-lg bg-teal-700 px-3 py-1.5 font-medium text-white hover:bg-teal-800"
                   >
                     <UploadCloud className="h-4 w-4" /> Yuborish
