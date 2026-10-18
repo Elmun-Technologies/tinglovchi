@@ -21,7 +21,10 @@ const uuidSchema = () => z.string().regex(RESOURCE_ID_SCHEMA_PATTERN, 'expected 
 export const desktopConnectCodeSchema = z
   .string()
   .trim()
-  .regex(/^[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}$/, 'expected a connect code like AB12-CDEF-GH34');
+  .regex(
+    /^[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}$/,
+    'expected a connect code like AB12-CDEF-GH34',
+  );
 
 export const desktopConnectCodeStatusSchema = z.enum([
   'pending',

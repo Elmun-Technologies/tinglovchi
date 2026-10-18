@@ -125,12 +125,20 @@ function consent() {
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(authBootstrap);
-  await db.exec(readFileSync(resolve('supabase/migrations/202610060001_phase1_foundation.sql'), 'utf8'));
   await db.exec(
-    readFileSync(resolve('supabase/migrations/202610070001_phase4_upload_processing_backbone.sql'), 'utf8'),
+    readFileSync(resolve('supabase/migrations/202610060001_phase1_foundation.sql'), 'utf8'),
   );
   await db.exec(
-    readFileSync(resolve('supabase/migrations/202610070002_phase4_1_security_hardening.sql'), 'utf8'),
+    readFileSync(
+      resolve('supabase/migrations/202610070001_phase4_upload_processing_backbone.sql'),
+      'utf8',
+    ),
+  );
+  await db.exec(
+    readFileSync(
+      resolve('supabase/migrations/202610070002_phase4_1_security_hardening.sql'),
+      'utf8',
+    ),
   );
   // The durable replay ledger the Recording API claims nonces in.
   await db.exec(
@@ -300,17 +308,18 @@ describe('1. web cannot instantiate a SqlExecutor', () => {
 
   it('offers no zero-argument or defaulted form that could be constructed by accident', () => {
     const source = readFileSync(resolve('packages/database/src/worker-executor.ts'), 'utf8');
-    expect(source).toMatch(/export async function getWorkerExecutor\(\s*request: WorkerExecutorRequest/);
+    expect(source).toMatch(
+      /export async function getWorkerExecutor\(\s*request: WorkerExecutorRequest/,
+    );
     expect(source).not.toMatch(/role:\s*PrivilegedRuntimeRole\s*=/);
     expect(source).not.toMatch(/role\?:\s*PrivilegedRuntimeRole/);
   });
 
   it('no file under apps/web imports the executor or the pg driver', async () => {
     const { execSync } = await import('node:child_process');
-    const files = execSync(
-      `find apps/web/src -type f \\( -name '*.ts' -o -name '*.tsx' \\)`,
-      { encoding: 'utf8' },
-    )
+    const files = execSync(`find apps/web/src -type f \\( -name '*.ts' -o -name '*.tsx' \\)`, {
+      encoding: 'utf8',
+    })
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
@@ -361,7 +370,11 @@ describe('2. web environment containing SUPABASE_DB_URL fails closed', () => {
     await expect(
       getWorkerExecutor({
         role: 'worker',
-        env: { NODE_ENV: 'production', SUHBAT_RUNTIME_ROLE: 'web', SUPABASE_DB_URL: 'postgresql://x' },
+        env: {
+          NODE_ENV: 'production',
+          SUHBAT_RUNTIME_ROLE: 'web',
+          SUPABASE_DB_URL: 'postgresql://x',
+        },
       }),
     ).rejects.toThrow(/SUHBAT_RUNTIME_ROLE=web, which forbids SUPABASE_DB_URL/);
   });
@@ -370,7 +383,11 @@ describe('2. web environment containing SUPABASE_DB_URL fails closed', () => {
     await expect(
       getWorkerExecutor({
         role: 'worker',
-        env: { NODE_ENV: 'production', SUHBAT_RUNTIME_ROLE: 'recording-api', SUPABASE_DB_URL: 'postgresql://x' },
+        env: {
+          NODE_ENV: 'production',
+          SUHBAT_RUNTIME_ROLE: 'recording-api',
+          SUPABASE_DB_URL: 'postgresql://x',
+        },
       }),
     ).rejects.toThrow(/does not match the requested role "worker"/);
   });
@@ -492,7 +509,9 @@ describe('4. recording API rejects requests without valid internal service authe
         body: '{}',
       });
       expect(response.status).toBe(401);
-      expect((await response.json() as { error: { code: string } }).error.code).toBe('unauthorized');
+      expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+        'unauthorized',
+      );
     } finally {
       await live.close();
     }
@@ -663,7 +682,12 @@ describe('5. client-supplied identity headers cannot forge a principal', () => {
       },
     });
     try {
-      const meetingId = await createMeetingDraft(userMemberA, workspaceA, meetingTypeA, 'Gateway Identity');
+      const meetingId = await createMeetingDraft(
+        userMemberA,
+        workspaceA,
+        meetingTypeA,
+        'Gateway Identity',
+      );
       // The client claims to be the workspace owner; the gateway authenticated it as the member.
       currentPrincipal = { userId: userMemberA };
       const response = await postRecordingRoute(
@@ -697,9 +721,15 @@ describe('5. client-supplied identity headers cannot forge a principal', () => {
 
     const differing = [
       signInternalRequest({ ...base, method: 'GET' }, key, { timestampMs: 1_000, nonce: 'n1' }),
-      signInternalRequest({ ...base, path: '/api/v1/other' }, key, { timestampMs: 1_000, nonce: 'n1' }),
+      signInternalRequest({ ...base, path: '/api/v1/other' }, key, {
+        timestampMs: 1_000,
+        nonce: 'n1',
+      }),
       signInternalRequest({ ...base, body: '{"a":1}' }, key, { timestampMs: 1_000, nonce: 'n1' }),
-      signInternalRequest({ ...base, userId: userOwnerB }, key, { timestampMs: 1_000, nonce: 'n1' }),
+      signInternalRequest({ ...base, userId: userOwnerB }, key, {
+        timestampMs: 1_000,
+        nonce: 'n1',
+      }),
       signInternalRequest(base, key, { timestampMs: 2_000, nonce: 'n1' }),
       signInternalRequest(base, key, { timestampMs: 1_000, nonce: 'n2' }),
     ];
@@ -892,7 +922,10 @@ describe('6b. durable replay protection across Recording API machines', () => {
     return { path, body, headers };
   }
 
-  function send(live: LiveRecordingApi, request: { path: string; body: string; headers: Record<string, string> }) {
+  function send(
+    live: LiveRecordingApi,
+    request: { path: string; body: string; headers: Record<string, string> },
+  ) {
     return fetch(`${live.baseUrl}${request.path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...request.headers },
@@ -919,7 +952,9 @@ describe('6b. durable replay protection across Recording API machines', () => {
       const second = await send(live, request);
       expect(first.status).toBe(201);
       expect(second.status).toBe(401);
-      expect((await second.json() as { error: { code: string } }).error.code).toBe('unauthorized');
+      expect(((await second.json()) as { error: { code: string } }).error.code).toBe(
+        'unauthorized',
+      );
     } finally {
       await live.close();
     }
@@ -966,7 +1001,10 @@ describe('6b. durable replay protection across Recording API machines', () => {
       const request = await signedCreateRequest(reserved);
 
       // Same nonce, signature corrupted. This must be refused AND must not burn the nonce.
-      const forged = { ...request, headers: { ...request.headers, [SIGNATURE_HEADER]: `v1=${'b'.repeat(64)}` } };
+      const forged = {
+        ...request,
+        headers: { ...request.headers, [SIGNATURE_HEADER]: `v1=${'b'.repeat(64)}` },
+      };
       const rejected = await send(live, forged);
       expect(rejected.status).toBe(401);
 
@@ -1109,7 +1147,10 @@ describe('6c. replay-protection SQL functions are internal-only', () => {
    * `usage on schema public` is granted first so that a failure is unambiguously about the
    * function's own privilege and not about the role being unable to resolve the schema at all.
    */
-  async function asClientRole<T>(role: 'anon' | 'authenticated', callback: () => Promise<T>): Promise<T> {
+  async function asClientRole<T>(
+    role: 'anon' | 'authenticated',
+    callback: () => Promise<T>,
+  ): Promise<T> {
     await db.exec('reset role');
     await db.exec(`grant usage on schema public to ${role}`);
     await db.exec(`set role ${role}`);
@@ -1206,7 +1247,9 @@ describe('6c. replay-protection SQL functions are internal-only', () => {
         new RegExp(`revoke all on function ${signature.replace(/[.()]/g, '\\$&')} from public`),
       );
     }
-    expect(migration).toMatch(/foreach v_role in array array\['anon', 'authenticated', 'service_role'\]/);
+    expect(migration).toMatch(
+      /foreach v_role in array array\['anon', 'authenticated', 'service_role'\]/,
+    );
     // And the grants that must never be written back.
     expect(migration).not.toMatch(/grant execute[\s\S]{0,200}to anon/);
     expect(migration).not.toMatch(/grant execute[\s\S]{0,200}to authenticated/);
@@ -1256,7 +1299,9 @@ describe('7. recording request path never reaches AssemblyAI', () => {
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
       const text = stripComments(readFileSync(resolve(file), 'utf8'));
-      expect(text, file).not.toMatch(/transcription-provider|assemblyai|Phase5TranscriptionService/i);
+      expect(text, file).not.toMatch(
+        /transcription-provider|assemblyai|Phase5TranscriptionService/i,
+      );
     }
   });
 
@@ -1271,7 +1316,12 @@ describe('7. recording request path never reaches AssemblyAI', () => {
     }) as unknown as typeof fetch;
 
     try {
-      const meetingA = await createMeetingDraft(userOwnerA, workspaceA, meetingTypeA, 'No AssemblyAI');
+      const meetingA = await createMeetingDraft(
+        userOwnerA,
+        workspaceA,
+        meetingTypeA,
+        'No AssemblyAI',
+      );
       const path = '/api/v1/recordings';
       const body = JSON.stringify({
         workspaceId: workspaceA,
@@ -1482,9 +1532,12 @@ describe('10. the desktop has one public API base URL', () => {
 
   it('never names an internal Fly host, a .internal or a .flycast address', async () => {
     const { execSync } = await import('node:child_process');
-    const files = execSync(`find apps/desktop/src apps/desktop/*.ts -type f \\( -name '*.ts' -o -name '*.tsx' \\)`, {
-      encoding: 'utf8',
-    })
+    const files = execSync(
+      `find apps/desktop/src apps/desktop/*.ts -type f \\( -name '*.ts' -o -name '*.tsx' \\)`,
+      {
+        encoding: 'utf8',
+      },
+    )
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
@@ -1496,9 +1549,9 @@ describe('10. the desktop has one public API base URL', () => {
 
   it('builds every request path under the single public /api/v1 prefix', () => {
     const cloud = readFileSync(resolve('apps/desktop/src/cloud.ts'), 'utf8');
-    const paths = [
-      ...cloud.matchAll(/call\(\s*[\s\S]{0,80}?'(\/api\/v1[^'`$]*)'/g),
-    ].map((m) => m[1]!);
+    const paths = [...cloud.matchAll(/call\(\s*[\s\S]{0,80}?'(\/api\/v1[^'`$]*)'/g)].map(
+      (m) => m[1]!,
+    );
     expect(paths.length).toBeGreaterThan(8);
     for (const path of paths) {
       expect(path.startsWith('/api/v1/')).toBe(true);

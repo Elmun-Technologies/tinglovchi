@@ -14,7 +14,10 @@ import {
   DELETE as deleteDesktopSession,
   GET as getDesktopSession,
 } from '../../apps/web/src/app/api/v1/desktop/sessions/route';
-import { consumeConnectCodeBudget, resetConnectCodeBudget } from '../../apps/web/src/lib/connect-code-rate-limit';
+import {
+  consumeConnectCodeBudget,
+  resetConnectCodeBudget,
+} from '../../apps/web/src/lib/connect-code-rate-limit';
 
 /** Mirrors the server's credential hashing so tests can look rows up the way the server stored them. */
 function sha256Hex(value: string): string {
@@ -43,11 +46,19 @@ const userOwnerB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const userOutsider = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
 const phase1MigrationPath = resolve('supabase/migrations/202610060001_phase1_foundation.sql');
-const phase4MigrationPath = resolve('supabase/migrations/202610070001_phase4_upload_processing_backbone.sql');
-const phase41SecurityMigrationPath = resolve('supabase/migrations/202610070002_phase4_1_security_hardening.sql');
-const phase5MigrationPath = resolve('supabase/migrations/202610070003_phase5_transcription_alignment.sql');
+const phase4MigrationPath = resolve(
+  'supabase/migrations/202610070001_phase4_upload_processing_backbone.sql',
+);
+const phase41SecurityMigrationPath = resolve(
+  'supabase/migrations/202610070002_phase4_1_security_hardening.sql',
+);
+const phase5MigrationPath = resolve(
+  'supabase/migrations/202610070003_phase5_transcription_alignment.sql',
+);
 const phase13MigrationPath = resolve('supabase/migrations/202610080001_phase13_desktop_client.sql');
-const phase13RotationPath = resolve('supabase/migrations/202610080002_phase13_desktop_session_rotation.sql');
+const phase13RotationPath = resolve(
+  'supabase/migrations/202610080002_phase13_desktop_session_rotation.sql',
+);
 const seedPath = resolve('supabase/seed.sql');
 
 const authBootstrap = `
@@ -178,7 +189,10 @@ beforeEach(async () => {
   await db.exec(
     'truncate public.desktop_sessions, public.desktop_connect_codes restart identity cascade',
   );
-  service = new Phase4BackboneService({ db, storage: new MemoryStorageProvider({ backend: 'local' }) });
+  service = new Phase4BackboneService({
+    db,
+    storage: new MemoryStorageProvider({ backend: 'local' }),
+  });
   desktop = new DesktopClientService({ rpc: pgliteRpc(db) });
   currentPrincipal = { userId: userOwnerA };
   setPhase4Runtime({
@@ -204,10 +218,14 @@ afterAll(async () => {
 describe('connect codes', () => {
   it('mints a short-lived, pending, high-entropy code without any credential', async () => {
     currentPrincipal = null;
-    const response = await postConnectCode(request('/api/v1/desktop/connect-codes', { method: 'POST' }));
+    const response = await postConnectCode(
+      request('/api/v1/desktop/connect-codes', { method: 'POST' }),
+    );
     expect(response.status).toBe(201);
     const body = (await response.json()) as { code: string; status: string; expiresAt: string };
-    expect(body.code).toMatch(/^[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}$/);
+    expect(body.code).toMatch(
+      /^[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}-[0-9A-HJ-KM-NP-TV-Z]{4}$/,
+    );
     expect(body.status).toBe('pending');
     const minutes = (Date.parse(body.expiresAt) - Date.now()) / 60_000;
     expect(minutes).toBeGreaterThan(8);
@@ -217,7 +235,8 @@ describe('connect codes', () => {
   it('draws codes from an unambiguous 32-symbol alphabet, so 12 characters carry 60 bits', async () => {
     // 256 % 32 === 0, so the modulo in randomCode() is uniform — no bias, no weak codes.
     const codes = new Set<string>();
-    for (let index = 0; index < 200; index += 1) codes.add((await desktop.createConnectCode({})).code);
+    for (let index = 0; index < 200; index += 1)
+      codes.add((await desktop.createConnectCode({})).code);
     expect(codes.size).toBe(200);
     for (const code of codes) {
       expect(code).not.toMatch(/[ILOU]/);
@@ -226,7 +245,9 @@ describe('connect codes', () => {
 
   it('stores only the hash of the code, never the code itself', async () => {
     const { code } = await desktop.createConnectCode({});
-    const rows = await db.query<{ code_hash: string }>(`select code_hash from public.desktop_connect_codes`);
+    const rows = await db.query<{ code_hash: string }>(
+      `select code_hash from public.desktop_connect_codes`,
+    );
     expect(rows.rows.some((row) => row.code_hash === code)).toBe(false);
     expect(rows.rows.some((row) => /^[0-9a-f]{64}$/.test(row.code_hash))).toBe(true);
   });
@@ -266,7 +287,9 @@ describe('connect codes', () => {
 
   it('refuses to approve a code with no authenticated principal', async () => {
     const created = await desktop.createConnectCode({});
-    await expect(desktop.authorizeConnectCode(null, created.code, workspaceA)).rejects.toMatchObject({
+    await expect(
+      desktop.authorizeConnectCode(null, created.code, workspaceA),
+    ).rejects.toMatchObject({
       code: 'unauthenticated',
     });
   });
@@ -332,7 +355,10 @@ describe('connect code exchange is atomic under concurrency', () => {
 
   it('ten simultaneous exchanges still produce exactly one session', async () => {
     const code = await issueCode();
-    const clients = Array.from({ length: 10 }, () => new DesktopClientService({ rpc: pgliteRpc(db) }));
+    const clients = Array.from(
+      { length: 10 },
+      () => new DesktopClientService({ rpc: pgliteRpc(db) }),
+    );
     const results = await Promise.allSettled(
       clients.map((client) => client.exchangeConnectCode({ code })),
     );
@@ -435,7 +461,9 @@ describe('refresh rotation', () => {
     expect(renewed.accessToken).not.toBe(session.accessToken);
     expect(renewed.refreshToken).not.toBe(session.refreshToken);
     await expect(desktop.resolveSessionToken(session.accessToken)).resolves.toBeNull();
-    await expect(desktop.describeSession({ userId: userOwnerA }, session.accessToken)).rejects.toThrow();
+    await expect(
+      desktop.describeSession({ userId: userOwnerA }, session.accessToken),
+    ).rejects.toThrow();
     // Replaying the old refresh token fails rather than minting another session.
     await expect(desktop.refreshSession(session.refreshToken)).rejects.toMatchObject({
       code: 'unauthorized',
@@ -455,14 +483,14 @@ describe('refresh rotation', () => {
 
   it('rotates on every use, so no refresh token is ever accepted twice', async () => {
     await issueSession();
-    const token = (await db.query<{ refresh_token_hash: string }>(
-      `select refresh_token_hash from public.desktop_sessions`,
-    )).rows[0]!.refresh_token_hash;
+    const token = (
+      await db.query<{ refresh_token_hash: string }>(
+        `select refresh_token_hash from public.desktop_sessions`,
+      )
+    ).rows[0]!.refresh_token_hash;
 
     // Drive the rotation directly through the service to observe the hash changing each time.
-    const first = await desktop.refreshSession(
-      await freshRefreshToken(),
-    );
+    const first = await desktop.refreshSession(await freshRefreshToken());
     expect(first.refreshToken).toBeTruthy();
     const second = await desktop.refreshSession(first.refreshToken);
     expect(second.refreshToken).not.toBe(first.refreshToken);
@@ -486,9 +514,10 @@ describe('refresh rotation', () => {
       userId: userOwnerA,
     });
     const rows = (
-      await db.query('select revoked_at from public.desktop_sessions where refresh_token_hash = $1', [
-        sha256Hex(renewed.refreshToken),
-      ])
+      await db.query(
+        'select revoked_at from public.desktop_sessions where refresh_token_hash = $1',
+        [sha256Hex(renewed.refreshToken)],
+      )
     ).rows as Array<{ revoked_at: string | null }>;
     expect(rows).toHaveLength(1);
     expect(rows[0]!.revoked_at).toBeNull();
@@ -618,11 +647,9 @@ describe('workspaces and automatic meeting creation', () => {
 
   it('creates a meeting from a workspace alone, defaulting title and type', async () => {
     const session = await issueSession();
-    const result = await desktop.ensureMeeting(
-      { userId: userOwnerA },
-      session.accessToken,
-      { workspaceId: workspaceA },
-    );
+    const result = await desktop.ensureMeeting({ userId: userOwnerA }, session.accessToken, {
+      workspaceId: workspaceA,
+    });
     expect(result.meeting.title).toMatch(/^Suhbat — \d{1,2} \w{3}, \d{2}:\d{2}$/);
     expect(result.meeting.meetingTypeId).toBeTruthy();
     expect(result.meeting.companyId).toBeNull();
@@ -643,7 +670,9 @@ describe('workspaces and automatic meeting creation', () => {
   it('refuses to create a meeting in a workspace the user cannot see', async () => {
     const session = await issueSession();
     await expect(
-      desktop.ensureMeeting({ userId: userOwnerA }, session.accessToken, { workspaceId: workspaceB }),
+      desktop.ensureMeeting({ userId: userOwnerA }, session.accessToken, {
+        workspaceId: workspaceB,
+      }),
     ).rejects.toMatchObject({ code: 'unauthorized' });
     await expect(
       desktop.ensureMeeting(null, session.accessToken, { workspaceId: workspaceA }),
@@ -719,7 +748,9 @@ describe('workspaces and automatic meeting creation', () => {
   it('answers the HTTP route with 201 and a validated DTO', async () => {
     const session = await issueSession();
     currentPrincipal = null;
-    const response = await (await import('../../apps/web/src/app/api/v1/meetings/route')).POST(
+    const response = await (
+      await import('../../apps/web/src/app/api/v1/meetings/route')
+    ).POST(
       request('/api/v1/meetings', {
         method: 'POST',
         headers: {
@@ -737,7 +768,9 @@ describe('workspaces and automatic meeting creation', () => {
   it('lists workspaces over HTTP for a desktop credential', async () => {
     const session = await issueSession();
     currentPrincipal = null;
-    const response = await (await import('../../apps/web/src/app/api/v1/workspaces/route')).GET(
+    const response = await (
+      await import('../../apps/web/src/app/api/v1/workspaces/route')
+    ).GET(
       request('/api/v1/workspaces', {
         headers: { authorization: `Bearer ${session.accessToken}` },
       }),
@@ -799,7 +832,9 @@ describe('row level security posture', () => {
     });
     await expect(desktop.describeSession(null, 'not-a-real-token')).rejects.toThrow();
     await expect(desktop.rememberWorkspace(null, 'not-a-real-token', workspaceA)).rejects.toThrow();
-    await expect(desktop.ensureMeeting(null, 'not-a-real-token', { workspaceId: workspaceA })).rejects.toThrow();
+    await expect(
+      desktop.ensureMeeting(null, 'not-a-real-token', { workspaceId: workspaceA }),
+    ).rejects.toThrow();
     await expect(desktop.listWorkspaces('not-a-real-token')).resolves.toEqual([]);
     expect(bogus).toHaveLength(64);
   });
@@ -858,10 +893,12 @@ describe('connect code abuse control', () => {
     );
     // Drive the ceiling down so the test does not have to create 2 000 rows.
     for (let index = 0; index < 5; index += 1) {
-      await db.query(`select * from public.desktop_create_connect_code($1, null, 600, $2)`, [
-        'b'.repeat(64),
-        before.rows[0]!.count + 2,
-      ]).catch(() => undefined);
+      await db
+        .query(`select * from public.desktop_create_connect_code($1, null, 600, $2)`, [
+          'b'.repeat(64),
+          before.rows[0]!.count + 2,
+        ])
+        .catch(() => undefined);
     }
     const after = await db.query<{ count: number }>(
       `select count(*)::int as count from public.desktop_connect_codes where expires_at > now()`,

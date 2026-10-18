@@ -120,7 +120,9 @@ function normalize(input: Partial<StoredSession>): StoredSession {
   const workspaces = Array.isArray(input.workspaces)
     ? input.workspaces.filter(
         (workspace): workspace is WorkspaceSummaryDto =>
-          Boolean(workspace) && typeof workspace.id === 'string' && typeof workspace.name === 'string',
+          Boolean(workspace) &&
+          typeof workspace.id === 'string' &&
+          typeof workspace.name === 'string',
       )
     : [];
   return {
@@ -135,8 +137,7 @@ function normalize(input: Partial<StoredSession>): StoredSession {
         : null,
     consentAcknowledgedAt:
       typeof input.consentAcknowledgedAt === 'string' ? input.consentAcknowledgedAt : null,
-    sessionExpiresAt:
-      typeof input.sessionExpiresAt === 'string' ? input.sessionExpiresAt : null,
+    sessionExpiresAt: typeof input.sessionExpiresAt === 'string' ? input.sessionExpiresAt : null,
     accessTokenExpiresAt:
       typeof input.accessTokenExpiresAt === 'string' ? input.accessTokenExpiresAt : null,
   };

@@ -179,20 +179,20 @@ The desktop app is an appliance, not a dashboard. It has exactly one primary con
 
 ### 9.1 Screens
 
-| Phase | What the user sees | What it is allowed to say |
-| --- | --- | --- |
-| `signed_out` | Connect code, "Brauzerda tasdiqlash" | Nothing else. No email field, no password field. |
-| `consent` | One sentence about what is recorded, "Tushunarli" | Consent must be acknowledged once per device. |
-| `idle` | Logo, workspace name, one large mic button, "Suhbatni boshlash", device status, a small settings affordance | No analytics, no navigation, no cards. |
-| `starting` | Button is busy, nothing else changes | Never a fake spinner that finishes before the recorder does. |
-| `recording` | Red state, large elapsed timer, live waveform, "Suhbat yozilmoqda", Pause, Stop, mic + system-audio indicators | Timer is canonical: it includes pauses and gaps (§3). |
-| `paused` | Timer frozen, "PAUSED", Resume, Stop | The timer does not reset. |
-| `stopping` | Busy; the recorder is finalizing chunk files | Nothing is claimed about the server yet. |
-| `uploading` | "Yuklanmoqda" with **verified / total chunk counts** | Counts only. Never a percentage. |
-| `processing` | "Audio saqlanmoqda" → "Yuklanmoqda" → "Transkripsiya qilinmoqda" → "Tahlil qilinmoqda" | The four headlines are chosen from the server's real `productState`; there is no fifth, invented state. |
-| `ready` | "Suhbat tayyor", title, duration, detected languages, "Natijani ko‘rish" | Duration and languages come from the pipeline, not from the local clock. |
-| `saved_locally` | "Internet yo‘q. Suhbat qurilmada xavfsiz saqlandi." | Honest: the audio is on disk and the queue will retry. |
-| `analysis_failed` | "Suhbat saqlandi. Tahlil vaqtincha bajarilmadi." | The meeting is not lost; the dashboard can retry. |
+| Phase             | What the user sees                                                                                             | What it is allowed to say                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `signed_out`      | Connect code, "Brauzerda tasdiqlash"                                                                           | Nothing else. No email field, no password field.                                                        |
+| `consent`         | One sentence about what is recorded, "Tushunarli"                                                              | Consent must be acknowledged once per device.                                                           |
+| `idle`            | Logo, workspace name, one large mic button, "Suhbatni boshlash", device status, a small settings affordance    | No analytics, no navigation, no cards.                                                                  |
+| `starting`        | Button is busy, nothing else changes                                                                           | Never a fake spinner that finishes before the recorder does.                                            |
+| `recording`       | Red state, large elapsed timer, live waveform, "Suhbat yozilmoqda", Pause, Stop, mic + system-audio indicators | Timer is canonical: it includes pauses and gaps (§3).                                                   |
+| `paused`          | Timer frozen, "PAUSED", Resume, Stop                                                                           | The timer does not reset.                                                                               |
+| `stopping`        | Busy; the recorder is finalizing chunk files                                                                   | Nothing is claimed about the server yet.                                                                |
+| `uploading`       | "Yuklanmoqda" with **verified / total chunk counts**                                                           | Counts only. Never a percentage.                                                                        |
+| `processing`      | "Audio saqlanmoqda" → "Yuklanmoqda" → "Transkripsiya qilinmoqda" → "Tahlil qilinmoqda"                         | The four headlines are chosen from the server's real `productState`; there is no fifth, invented state. |
+| `ready`           | "Suhbat tayyor", title, duration, detected languages, "Natijani ko‘rish"                                       | Duration and languages come from the pipeline, not from the local clock.                                |
+| `saved_locally`   | "Internet yo‘q. Suhbat qurilmada xavfsiz saqlandi."                                                            | Honest: the audio is on disk and the queue will retry.                                                  |
+| `analysis_failed` | "Suhbat saqlandi. Tahlil vaqtincha bajarilmadi."                                                               | The meeting is not lost; the dashboard can retry.                                                       |
 
 ### 9.2 Start → Stop → Ready
 
@@ -228,9 +228,9 @@ exception is the local finalize, which is the recorder's own job and predates th
 Recording is never blocked by a form. The desktop calls `POST /api/v1/meetings` with a workspace id
 and nothing else:
 
-* no `title` → `Suhbat — 8 Oct, 14:32`, generated in local time;
-* no `meetingTypeId` → the workspace's own default type (lowest active sort order);
-* no company/project → both stay `null`, editable from the dashboard.
+- no `title` → `Suhbat — 8 Oct, 14:32`, generated in local time;
+- no `meetingTypeId` → the workspace's own default type (lowest active sort order);
+- no company/project → both stay `null`, editable from the dashboard.
 
 The response reports which defaults were applied (`defaultsApplied`), so the UI can tell the user the
 title was chosen for them rather than pretending they typed it.
@@ -245,12 +245,12 @@ desktop: GET  /api/v1/desktop/connect-codes      →  authorized
 desktop: POST /api/v1/desktop/sessions           →  long-lived bearer token (90 days)
 ```
 
-* The code is single-use and expires in 10 minutes. Only its SHA-256 is stored.
-* The session token is returned exactly once and only its SHA-256 is stored. It lives in the
+- The code is single-use and expires in 10 minutes. Only its SHA-256 is stored.
+- The session token is returned exactly once and only its SHA-256 is stored. It lives in the
   renderer's `localStorage` (`suhbat.desktop.v1`), which holds **no** credential beyond it.
-* The token is sent only to the API origin named by `VITE_SUHBAT_API_BASE_URL`. Chunk bytes go to a
+- The token is sent only to the API origin named by `VITE_SUHBAT_API_BASE_URL`. Chunk bytes go to a
   short-lived signed storage URL that is fetched **without** the token — see §9.5.
-* Email/password never touches the desktop app, and no provider secret ever does.
+- Email/password never touches the desktop app, and no provider secret ever does.
 
 ### 9.5 The network seam
 
@@ -275,9 +275,9 @@ HTTP request is.
 
 No code path in `recorder-core` removes audio. The only `remove_file` calls are:
 
-* `writer.rs` — a zero-sample chunk that was never written to (`sample_count == 0 || data_bytes == 0`);
-* `storage.rs` — a `manifest.json.tmp-*` temp file left by an interrupted atomic manifest write;
-* `recovery.rs` — a `.wav.partial` shell smaller than one chunk header, i.e. a file that holds no audio.
+- `writer.rs` — a zero-sample chunk that was never written to (`sample_count == 0 || data_bytes == 0`);
+- `storage.rs` — a `manifest.json.tmp-*` temp file left by an interrupted atomic manifest write;
+- `recovery.rs` — a `.wav.partial` shell smaller than one chunk header, i.e. a file that holds no audio.
 
 `remove_dir_all` appears only inside `#[cfg(test)]` modules. `tests/desktop/cloud-boundary.test.ts`
 enforces all of the above so a future change cannot quietly start deleting recordings.
@@ -292,12 +292,12 @@ session, closes its manifest, and offers to upload it.
 
 ### 9.8 Test coverage
 
-| Suite | Covers |
-| --- | --- |
-| `tests/desktop/one-tap-flow.test.ts` | Every transition above, duplicate start/stop, workspace switch guard, close guard, crash-recovery entry |
-| `tests/desktop/cloud-client.test.ts` | Endpoint routing, error classification, credential containment, base-URL validation |
-| `tests/desktop/upload-runner.test.ts` | Offline classification, exactly-once upload, resume, no fabricated progress |
-| `tests/desktop/cloud-boundary.test.ts` | The network seam and the never-deletes guarantee |
-| `tests/desktop/recorder-contract.test.ts` | Rust ↔ TypeScript field-by-field agreement |
-| `tests/desktop/rust-structure.test.ts` | `generate_handler!` ↔ `commands.rs` ↔ `bridge.ts` stay in sync |
-| `tests/rls/phase13-desktop-client.test.ts` | Connect codes, session hashing/revocation/expiry, workspace isolation, RLS posture |
+| Suite                                      | Covers                                                                                                  |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `tests/desktop/one-tap-flow.test.ts`       | Every transition above, duplicate start/stop, workspace switch guard, close guard, crash-recovery entry |
+| `tests/desktop/cloud-client.test.ts`       | Endpoint routing, error classification, credential containment, base-URL validation                     |
+| `tests/desktop/upload-runner.test.ts`      | Offline classification, exactly-once upload, resume, no fabricated progress                             |
+| `tests/desktop/cloud-boundary.test.ts`     | The network seam and the never-deletes guarantee                                                        |
+| `tests/desktop/recorder-contract.test.ts`  | Rust ↔ TypeScript field-by-field agreement                                                              |
+| `tests/desktop/rust-structure.test.ts`     | `generate_handler!` ↔ `commands.rs` ↔ `bridge.ts` stay in sync                                          |
+| `tests/rls/phase13-desktop-client.test.ts` | Connect codes, session hashing/revocation/expiry, workspace isolation, RLS posture                      |

@@ -239,7 +239,11 @@ export function reduceFlow(state: FlowState, action: FlowAction): FlowState {
       return { ...state, phase: 'processing', upload: null };
 
     case 'processing':
-      if (state.phase !== 'processing' && state.phase !== 'uploading' && state.phase !== 'saved_locally') {
+      if (
+        state.phase !== 'processing' &&
+        state.phase !== 'uploading' &&
+        state.phase !== 'saved_locally'
+      ) {
         return state;
       }
       const failed =
@@ -248,7 +252,8 @@ export function reduceFlow(state: FlowState, action: FlowAction): FlowState {
         action.productState === 'analysis_failed';
       return {
         ...state,
-        phase: action.productState === 'ready' ? 'ready' : failed ? 'analysis_failed' : 'processing',
+        phase:
+          action.productState === 'ready' ? 'ready' : failed ? 'analysis_failed' : 'processing',
         // A provider failure is not a lost meeting: the audio is on the server and the dashboard can
         // retry, so the notice says exactly that instead of implying the recording failed.
         notice: failed ? (action.error ?? state.notice) : state.notice,
@@ -316,7 +321,10 @@ const LIVE_PHASES = new Set<FlowPhase>(['starting', 'recording', 'paused', 'stop
  * `stopped` deliberately does *not* move the flow: the local finalize is done, but the flow's next
  * phase depends on whether the network is reachable, which the uploader decides.
  */
-function phaseFromRecorder(current: FlowPhase, state: 'recording' | 'paused' | 'stopped' | 'failed'): FlowPhase {
+function phaseFromRecorder(
+  current: FlowPhase,
+  state: 'recording' | 'paused' | 'stopped' | 'failed',
+): FlowPhase {
   if (!LIVE_PHASES.has(current)) return current;
   if (state === 'recording') return current === 'starting' ? current : 'recording';
   if (state === 'paused') return 'paused';
@@ -342,7 +350,12 @@ export function canStop(state: FlowState): boolean {
 }
 
 export function isCapturing(state: FlowState): boolean {
-  return state.phase === 'recording' || state.phase === 'paused' || state.phase === 'starting' || state.phase === 'stopping';
+  return (
+    state.phase === 'recording' ||
+    state.phase === 'paused' ||
+    state.phase === 'starting' ||
+    state.phase === 'stopping'
+  );
 }
 
 export type ProcessingHeadline = { title: string; detail: string | null };

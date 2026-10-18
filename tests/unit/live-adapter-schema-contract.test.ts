@@ -12,7 +12,14 @@ import { describe, expect, it } from 'vitest';
  */
 
 const migrationsDir = join(process.cwd(), 'supabase', 'migrations');
-const adapterPath = join(process.cwd(), 'apps', 'web', 'src', 'lib', 'supabase-live-repositories.ts');
+const adapterPath = join(
+  process.cwd(),
+  'apps',
+  'web',
+  'src',
+  'lib',
+  'supabase-live-repositories.ts',
+);
 
 function migrationSql(): string {
   return readdirSync(migrationsDir)
@@ -43,7 +50,9 @@ function schemaColumns(): Map<string, Set<string>> {
     tables.set(table, columns);
   };
 
-  for (const match of sql.matchAll(/create table (?:if not exists )?public\.([a-z_]+)\s*\(([\s\S]*?)\n\);/gi)) {
+  for (const match of sql.matchAll(
+    /create table (?:if not exists )?public\.([a-z_]+)\s*\(([\s\S]*?)\n\);/gi,
+  )) {
     const [, table, body] = match;
     for (const rawLine of body.split('\n')) {
       const line = rawLine.trim();
@@ -73,7 +82,8 @@ function adapterReads(): AdapterRead[] {
 
   sites.forEach((site, index) => {
     const start = (site.index ?? 0) + site[0].length;
-    const end = index + 1 < sites.length ? (sites[index + 1].index ?? source.length) : source.length;
+    const end =
+      index + 1 < sites.length ? (sites[index + 1].index ?? source.length) : source.length;
     const window = source.slice(start, end);
     for (const select of window.matchAll(/\.select\(\s*'([^']*)'/g)) {
       const columns = select[1]

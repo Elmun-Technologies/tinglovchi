@@ -29,7 +29,12 @@ export function ConsentView({ onAccept }: { onAccept: () => void }) {
           <span>{copy.consent.checkbox}</span>
         </label>
 
-        <button type="button" className="pill-button primary" onClick={onAccept} disabled={!accepted}>
+        <button
+          type="button"
+          className="pill-button primary"
+          onClick={onAccept}
+          disabled={!accepted}
+        >
           {copy.consent.accept}
         </button>
       </div>

@@ -58,9 +58,7 @@ export type PostgresNonceStoreOptions = {
   onError?: (cause: unknown) => void;
 };
 
-export function createPostgresNonceStore(
-  options: PostgresNonceStoreOptions,
-): DurableNonceStore {
+export function createPostgresNonceStore(options: PostgresNonceStoreOptions): DurableNonceStore {
   const db = options.db;
   const purgeEveryClaims = Math.max(1, options.purgeEveryClaims ?? 100);
   const purgeMaxRows = Math.max(1, options.purgeMaxRows ?? 1_000);

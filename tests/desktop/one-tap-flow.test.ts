@@ -55,24 +55,30 @@ describe('boot and sign-in', () => {
   });
 
   it('reaches idle only after consent is acknowledged', () => {
-    const consent = booted().phase === 'consent' ? booted() : reduceFlow(initialFlowState, {
-      type: 'booted',
-      signedIn: true,
-      workspaceId: 'ws-1',
-      consented: false,
-    });
+    const consent =
+      booted().phase === 'consent'
+        ? booted()
+        : reduceFlow(initialFlowState, {
+            type: 'booted',
+            signedIn: true,
+            workspaceId: 'ws-1',
+            consented: false,
+          });
     expect(consent.phase).toBe('consent');
     const accepted = reduceFlow(consent, { type: 'consent_acknowledged', workspaceId: 'ws-1' });
     expect(accepted.phase).toBe('idle');
   });
 
   it('clears the pairing code and local context on sign-out', () => {
-    const signedIn = reduceFlow(reduceFlow(initialFlowState, {
-      type: 'booted',
-      signedIn: true,
-      workspaceId: 'ws-1',
-      consented: true,
-    }), { type: 'pairing_code', code: 'AB12-CDEF-GH34' });
+    const signedIn = reduceFlow(
+      reduceFlow(initialFlowState, {
+        type: 'booted',
+        signedIn: true,
+        workspaceId: 'ws-1',
+        consented: true,
+      }),
+      { type: 'pairing_code', code: 'AB12-CDEF-GH34' },
+    );
     const out = reduceFlow(signedIn, { type: 'signed_out' });
     expect(out.phase).toBe('signed_out');
     expect(out.pairingCode).toBeNull();

@@ -10,9 +10,8 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
-  const { assertCanonicalAppUrlConfiguration, isSupabaseConfigured } = await import(
-    '@suhbat/database/config'
-  );
+  const { assertCanonicalAppUrlConfiguration, isSupabaseConfigured } =
+    await import('@suhbat/database/config');
   assertCanonicalAppUrlConfiguration();
 
   const dataMode = process.env.SUHBAT_DATA_MODE?.trim().toLowerCase();

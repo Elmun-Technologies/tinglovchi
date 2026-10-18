@@ -41,8 +41,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = (await parseJsonBody(request, { allowEmpty: true })) as
-      | CreateDesktopConnectCodeRequestInput
-      | Record<string, never>;
+      CreateDesktopConnectCodeRequestInput | Record<string, never>;
     const clientLabel =
       body && typeof body === 'object' && 'clientLabel' in body
         ? typeof body.clientLabel === 'string'

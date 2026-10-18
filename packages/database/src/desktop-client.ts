@@ -61,7 +61,12 @@ type RpcFailure = { code: string; message: string };
 
 /** Maps a database-raised SQLSTATE onto the API error vocabulary. */
 function rpcFailure(cause: unknown, fallback: string): RpcFailure {
-  const raw = cause as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown } | null;
+  const raw = cause as {
+    code?: unknown;
+    message?: unknown;
+    details?: unknown;
+    hint?: unknown;
+  } | null;
   const code = typeof raw?.code === 'string' ? raw.code : '';
   const message =
     typeof raw?.message === 'string' && raw.message.trim() ? raw.message.trim() : fallback;
@@ -156,9 +161,9 @@ export class DesktopClientService {
    * row is worthless until a signed-in human approves it, and creation is bounded by a live-code
    * ceiling so an anonymous caller cannot use this to grow the table.
    */
-  async createConnectCode(
-    rawInput?: { clientLabel?: string },
-  ): Promise<CreateDesktopConnectCodeResult> {
+  async createConnectCode(rawInput?: {
+    clientLabel?: string;
+  }): Promise<CreateDesktopConnectCodeResult> {
     const code = randomCode();
     let expiresAt: string;
     try {
@@ -243,9 +248,10 @@ export class DesktopClientService {
    * statement. Concurrent exchanges cannot both win, and a second attempt simply finds nothing to
    * claim and answers 404.
    */
-  async exchangeConnectCode(
-    rawInput: { code?: string; clientLabel?: string },
-  ): Promise<DesktopSessionResponse> {
+  async exchangeConnectCode(rawInput: {
+    code?: string;
+    clientLabel?: string;
+  }): Promise<DesktopSessionResponse> {
     const parsed = desktopConnectCodeSchema.safeParse(rawInput?.code);
     if (!parsed.success) {
       throw new Phase4ServiceError(400, 'validation_failed', 'That is not a valid connect code.');
@@ -281,9 +287,7 @@ export class DesktopClientService {
     return {
       accessToken,
       refreshToken,
-      accessTokenExpiresAt: new Date(
-        Date.now() + DESKTOP_ACCESS_TOKEN_TTL_MS,
-      ).toISOString(),
+      accessTokenExpiresAt: new Date(Date.now() + DESKTOP_ACCESS_TOKEN_TTL_MS).toISOString(),
       refreshTokenExpiresAt: toIso(row.refresh_token_expires_at),
       userId,
       userEmail: typeof row.user_email === 'string' ? row.user_email : null,
@@ -301,9 +305,7 @@ export class DesktopClientService {
    * fails, and replaying it well after the rotation revokes the whole session, because at that point
    * it is far more likely to be a stolen credential than a lost response.
    */
-  async refreshSession(
-    rawToken: string | null | undefined,
-  ): Promise<DesktopSessionResponse> {
+  async refreshSession(rawToken: string | null | undefined): Promise<DesktopSessionResponse> {
     if (typeof rawToken !== 'string' || rawToken.length < 32) {
       throw new Phase4ServiceError(401, 'unauthorized', 'That refresh token is not valid.');
     }
@@ -518,21 +520,20 @@ export class DesktopClientService {
       p_access_token_hash: typeof accessToken === 'string' ? sha256Hex(accessToken) : null,
     });
     return rows(payload).map((row) => ({
-        id: String(row.workspace_id ?? ''),
-        name: String(row.name ?? ''),
-        role: WORKSPACE_ROLE_VALUES.has(String(row.role))
-          ? (String(row.role) as WorkspaceSummaryDto['role'])
-          : 'member',
-        defaultMeetingTypeId: row.default_meeting_type_id
-          ? String(row.default_meeting_type_id)
-          : null,
-        defaultMeetingTypeLabel: row.default_meeting_type_label
-          ? String(row.default_meeting_type_label)
-          : null,
-        meetingTypeCount: toNumber(row.meeting_type_count),
-      }));
+      id: String(row.workspace_id ?? ''),
+      name: String(row.name ?? ''),
+      role: WORKSPACE_ROLE_VALUES.has(String(row.role))
+        ? (String(row.role) as WorkspaceSummaryDto['role'])
+        : 'member',
+      defaultMeetingTypeId: row.default_meeting_type_id
+        ? String(row.default_meeting_type_id)
+        : null,
+      defaultMeetingTypeLabel: row.default_meeting_type_label
+        ? String(row.default_meeting_type_label)
+        : null,
+      meetingTypeCount: toNumber(row.meeting_type_count),
+    }));
   }
-
 }
 
 export function requireUserId(auth: AuthenticatedPrincipal | null | undefined): string {

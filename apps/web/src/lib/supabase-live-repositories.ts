@@ -86,7 +86,10 @@ export interface PostgrestQuery<Row> extends PromiseLike<PostgrestRows<Row>> {
   neq(column: string, value: unknown): PostgrestQuery<Row>;
   in(column: string, values: readonly unknown[]): PostgrestQuery<Row>;
   is(column: string, value: boolean | null): PostgrestQuery<Row>;
-  order(column: string, options?: { ascending?: boolean; nullsFirst?: boolean }): PostgrestQuery<Row>;
+  order(
+    column: string,
+    options?: { ascending?: boolean; nullsFirst?: boolean },
+  ): PostgrestQuery<Row>;
   limit(count: number): PostgrestQuery<Row>;
   maybeSingle(): PromiseLike<PostgrestRow<Row>>;
 }
@@ -107,14 +110,10 @@ export type SupabaseLiveRepositoryContext = {
 
 type Row = Record<string, unknown>;
 
-
 function textOrNull(row: Row, key: string): string | null {
   const value = row[key];
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
-
-
-
 
 function toIso(value: unknown, fallback?: string): string {
   if (value instanceof Date) return value.toISOString();
@@ -125,9 +124,10 @@ function toIso(value: unknown, fallback?: string): string {
   return fallback ?? new Date().toISOString();
 }
 
-
 function toTextArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 /** PostgREST/JWT failures are mapped onto the product's repository error codes; internals stay in `detail`. */
@@ -420,9 +420,7 @@ function isPipelineStep(value: string): value is PipelineStep {
 }
 
 function isFailureState(value: string): value is FailureState {
-  return (
-    value === 'failed' || value === 'transcription_failed' || value === 'analysis_failed'
-  );
+  return value === 'failed' || value === 'transcription_failed' || value === 'analysis_failed';
 }
 
 /** `uploaded` is a database-only label between `uploading` and `preparing`; the product has no such step. */
@@ -456,19 +454,21 @@ function productStateOf(meeting: MeetingRow): CanonicalState {
 function buildTimeline(meetingId: string, state: CanonicalState): ProcessingTimeline {
   const failure = isFailureState(state);
   const activeIndex = failure ? PIPELINE_STEPS.length - 1 : PIPELINE_STEPS.indexOf(state);
-  const steps: ProcessingStep[] = PIPELINE_STEPS.filter((step) => step !== 'indexing').map((step) => {
-    const index = PIPELINE_STEPS.indexOf(step);
-    const stepState: ProcessingStep['state'] = failure
-      ? index < activeIndex
-        ? 'done'
-        : 'pending'
-      : index < activeIndex
-        ? 'done'
-        : index === activeIndex
-          ? 'active'
-          : 'pending';
-    return { state: stepState, key: step, label: PIPELINE_STEP_LABELS[step] };
-  });
+  const steps: ProcessingStep[] = PIPELINE_STEPS.filter((step) => step !== 'indexing').map(
+    (step) => {
+      const index = PIPELINE_STEPS.indexOf(step);
+      const stepState: ProcessingStep['state'] = failure
+        ? index < activeIndex
+          ? 'done'
+          : 'pending'
+        : index < activeIndex
+          ? 'done'
+          : index === activeIndex
+            ? 'active'
+            : 'pending';
+      return { state: stepState, key: step, label: PIPELINE_STEP_LABELS[step] };
+    },
+  );
   if (failure) {
     return {
       meetingId,
@@ -541,7 +541,12 @@ function mapFactCategory(value: string): Fact['category'] {
 }
 
 function mapDecisionStatus(value: string): Decision['status'] {
-  if (value === 'proposed' || value === 'tentative' || value === 'confirmed' || value === 'rejected') {
+  if (
+    value === 'proposed' ||
+    value === 'tentative' ||
+    value === 'confirmed' ||
+    value === 'rejected'
+  ) {
     return value;
   }
   if (value === 'superseded') return 'superseded';
@@ -549,7 +554,12 @@ function mapDecisionStatus(value: string): Decision['status'] {
 }
 
 function mapTaskStatus(value: string): Task['status'] {
-  if (value === 'in_progress' || value === 'blocked' || value === 'completed' || value === 'cancelled') {
+  if (
+    value === 'in_progress' ||
+    value === 'blocked' ||
+    value === 'completed' ||
+    value === 'cancelled'
+  ) {
     return value;
   }
   return 'open';
@@ -646,9 +656,9 @@ export function createSupabaseLiveRepositories(
             if (typeof method !== 'string') return undefined;
             return async (...args: unknown[]) => {
               const repositories = await ensureBuilt();
-              const namespace = (repositories as unknown as Record<string, Record<string, unknown>>)[
-                property
-              ];
+              const namespace = (
+                repositories as unknown as Record<string, Record<string, unknown>>
+              )[property];
               const fn = namespace?.[method];
               if (typeof fn !== 'function') {
                 throw new RepositoryError(
@@ -684,7 +694,9 @@ export const sessionLiveCapabilities: DataCapabilities = {
     'Live workspace database — meeting, transcript and intelligence records come from authorized backend rows.',
 };
 
-function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): ProductRepositories {
+function buildSupabaseLiveRepositories(
+  context: SupabaseLiveRepositoryContext,
+): ProductRepositories {
   const { client, userId } = context;
 
   const capabilities = sessionLiveCapabilities;
@@ -777,7 +789,10 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
     const transcriptionRunIds = [
       ...new Set(
         meetingRows
-          .map((meeting) => meeting.current_transcription_run_id ?? meeting.latest_transcription_run_id)
+          .map(
+            (meeting) =>
+              meeting.current_transcription_run_id ?? meeting.latest_transcription_run_id,
+          )
           .filter((value): value is string => Boolean(value)),
       ),
     ];
@@ -822,7 +837,9 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
       readRows<RecordingRow>(
         client
           .from('recordings')
-          .select('id, meeting_id, status, session_id, canonical_duration_ms, active_capture_ms, created_at, deleted_at')
+          .select(
+            'id, meeting_id, status, session_id, canonical_duration_ms, active_capture_ms, created_at, deleted_at',
+          )
           .eq('workspace_id', workspaceId)
           .in('meeting_id', meetingIds)
           .is('deleted_at', null)
@@ -1357,10 +1374,12 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
           ...(recording ? { manifestSessionId: recording.session_id } : {}),
         },
         stats: {
-          speakingParticipants: meetingSpeakers.filter((speaker) => speaker.segment_count > 0).length,
+          speakingParticipants: meetingSpeakers.filter((speaker) => speaker.segment_count > 0)
+            .length,
           topics: topics.length,
           decisions: decisions.length,
-          confirmedDecisions: decisions.filter((decision) => decision.status === 'confirmed').length,
+          confirmedDecisions: decisions.filter((decision) => decision.status === 'confirmed')
+            .length,
           tasks: tasks.length,
           openTasks,
           questions: questions.length,
@@ -1821,7 +1840,9 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
     },
     async processing(meetingId: string): Promise<ProcessingTimeline> {
       const [bundle] = await loadBundlesForMeeting(meetingId);
-      return bundle.detail.processing ?? buildTimeline(meetingId, bundle.summary.state as CanonicalState);
+      return (
+        bundle.detail.processing ?? buildTimeline(meetingId, bundle.summary.state as CanonicalState)
+      );
     },
     async decisionsFor(scope) {
       const bundles = await loadScoped(scope);
@@ -1848,11 +1869,7 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
   /** Loads one meeting and enforces that it belongs to the workspace its own row declares. */
   async function loadBundlesForMeeting(meetingId: string): Promise<MeetingBundle[]> {
     const row = await readMaybeRow<MeetingRow>(
-      client
-        .from('meetings')
-        .select('workspace_id')
-        .eq('id', meetingId)
-        .is('deleted_at', null),
+      client.from('meetings').select('workspace_id').eq('id', meetingId).is('deleted_at', null),
       'meetings.detail',
     );
     if (!row) throw new RepositoryError('not_found', 'Meeting was not found.');
@@ -1895,7 +1912,10 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
     },
     async segmentsForTopic(topicId: string) {
       const topic = await readMaybeRow<TopicRow>(
-        client.from('meeting_topics').select('id, meeting_id, source_segment_ids').eq('id', topicId),
+        client
+          .from('meeting_topics')
+          .select('id, meeting_id, source_segment_ids')
+          .eq('id', topicId),
         'transcripts.segmentsForTopic',
       );
       if (!topic) return [];
@@ -1917,7 +1937,9 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
       throw new RepositoryError(
         'provider_unavailable',
         'Speaker mapping is applied by the processing service, not by the dashboard session.',
-        { hint: 'Mapping writes require the server-side pipeline; this read-only session cannot change it.' },
+        {
+          hint: 'Mapping writes require the server-side pipeline; this read-only session cannot change it.',
+        },
       );
     },
   };
@@ -2116,7 +2138,9 @@ function buildSupabaseLiveRepositories(context: SupabaseLiveRepositoryContext): 
           }
         }
         for (const task of bundle.tasks) {
-          if (`${task.title} ${task.detail ?? ''} ${task.ownerLabel}`.toLowerCase().includes(needle)) {
+          if (
+            `${task.title} ${task.detail ?? ''} ${task.ownerLabel}`.toLowerCase().includes(needle)
+          ) {
             add({
               kind: 'task',
               id: task.id,
