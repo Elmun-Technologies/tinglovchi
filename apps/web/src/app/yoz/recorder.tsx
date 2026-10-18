@@ -1,56 +1,102 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
-import { Mic, Pause, Play, Square, UploadCloud, Trash2, AlertTriangle } from 'lucide-react';
-import { formatTimestamp, formatDateTime } from '../../lib/quick/format';
 import {
+  AlertTriangle,
+  Mic,
+  MonitorSpeaker,
+  Pause,
+  Play,
+  Square,
+  Trash2,
+  UploadCloud,
+  Users,
+} from 'lucide-react';
+import { formatDateTime, formatTimestamp } from '../../lib/quick/format';
+import {
+  appendLocalChunk,
   deleteLocalRecording,
   listLocalRecordings,
   loadLocalRecording,
   saveLocalRecordingMeta,
-  appendLocalChunk,
   type LocalRecording,
   type LocalRecordingMeta,
 } from '../../lib/quick/local-recordings';
+import { uploadRecording } from '../../lib/quick/upload-client';
 
 type Phase = 'idle' | 'starting' | 'recording' | 'paused' | 'uploading';
+type Language = 'uz' | 'ru' | 'en';
+type CaptureMode = 'mic' | 'mic_and_system';
 
 // MediaRecorder delivers a piece this often; each piece is also saved locally.
 const SLICE_MS = 5_000;
+
+const LANGUAGES: Array<{ value: Language; label: string }> = [
+  { value: 'uz', label: 'O‘zbekcha' },
+  { value: 'ru', label: 'Русский' },
+  { value: 'en', label: 'English' },
+];
 
 function pickMimeType(): string {
   const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? '';
 }
 
-function uploadRecording(
-  recording: LocalRecording,
-  onProgress: (fraction: number) => void,
-): Promise<string> {
-  const type = recording.mimeType || recording.chunks[0]?.type || 'audio/webm';
-  const form = new FormData();
-  form.append('audio', new Blob(recording.chunks, { type }), 'suhbat');
-  form.append('recordedMs', String(Math.round(recording.recordedMs)));
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/quick/sessions');
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(event.loaded / event.total);
-    };
-    xhr.onload = () => {
-      try {
-        const body = JSON.parse(xhr.responseText) as { id?: string; error?: string };
-        if (xhr.status === 201 && body.id) resolve(body.id);
-        else reject(new Error(body.error ?? `Server xatosi (${xhr.status})`));
-      } catch {
-        reject(new Error(`Server xatosi (${xhr.status})`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('Internet aloqasi yo‘q. Yozuv telefonda saqlandi.'));
-    xhr.send(form);
-  });
+/* ------------------------------------------------------ remembered choices */
+
+const PREFERENCE_EVENT = 'suhbat-preference';
+
+function readPreference<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  try {
+    const value = localStorage.getItem(key);
+    return allowed.includes(value as T) ? (value as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }
+
+function writePreference(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage blocked: the choice simply is not remembered.
+  }
+  window.dispatchEvent(new Event(PREFERENCE_EVENT));
+}
+
+function subscribePreference(onChange: () => void): () => void {
+  window.addEventListener(PREFERENCE_EVENT, onChange);
+  window.addEventListener('storage', onChange);
+  return () => {
+    window.removeEventListener(PREFERENCE_EVENT, onChange);
+    window.removeEventListener('storage', onChange);
+  };
+}
+
+function usePreference<T extends string>(key: string, allowed: readonly T[], fallback: T) {
+  const value = useSyncExternalStore(
+    subscribePreference,
+    () => readPreference(key, allowed, fallback),
+    () => fallback,
+  );
+  const set = useCallback((next: T) => writePreference(key, next), [key]);
+  return [value, set] as const;
+}
+
+// Recording a call's sound needs screen-share with audio, which phones' browsers do not offer.
+const noSubscription = () => () => undefined;
+function useCanCaptureSystemAudio(): boolean {
+  return useSyncExternalStore(
+    noSubscription,
+    () =>
+      typeof navigator.mediaDevices?.getDisplayMedia === 'function' &&
+      !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+    () => false,
+  );
+}
+
+/* ---------------------------------------------------------------- component */
 
 export function Recorder({ warnings }: { warnings: string[] }) {
   const router = useRouter();
@@ -60,11 +106,22 @@ export function Recorder({ warnings }: { warnings: string[] }) {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [pending, setPending] = useState<LocalRecordingMeta[]>([]);
+  const [language, setLanguage] = usePreference<Language>(
+    'suhbat.language',
+    ['uz', 'ru', 'en'],
+    'uz',
+  );
+  const [captureMode, setCaptureMode] = usePreference<CaptureMode>(
+    'suhbat.captureMode',
+    ['mic', 'mic_and_system'],
+    'mic',
+  );
+  const canCaptureSystemAudio = useCanCaptureSystemAudio();
+  const effectiveMode: CaptureMode = canCaptureSystemAudio ? captureMode : 'mic';
 
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const streamsRef = useRef<MediaStream[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const recordingRef = useRef<LocalRecording | null>(null);
   const clockRef = useRef<{ runningSince: number | null; accumulated: number }>({
     runningSince: null,
     accumulated: 0,
@@ -129,8 +186,8 @@ export function Recorder({ warnings }: { warnings: string[] }) {
   const releaseDevices = useCallback(() => {
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+    streamsRef.current.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
+    streamsRef.current = [];
     void audioContextRef.current?.close().catch(() => undefined);
     audioContextRef.current = null;
     void wakeLockRef.current?.release().catch(() => undefined);
@@ -146,7 +203,22 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       setProgress(0);
       setError(null);
       try {
-        const id = await uploadRecording(recording, setProgress);
+        const id = await uploadRecording(recording, {
+          onProgress: setProgress,
+          onUploadId: async (uploadId) => {
+            recording.uploadId = uploadId;
+            await saveLocalRecordingMeta({
+              id: recording.id,
+              startedAt: recording.startedAt,
+              mimeType: recording.mimeType,
+              recordedMs: recording.recordedMs,
+              chunkCount: recording.chunks.length,
+              language: recording.language,
+              captureMode: recording.captureMode,
+              uploadId,
+            }).catch(() => undefined);
+          },
+        });
         await deleteLocalRecording(recording.id).catch(() => undefined);
         router.push(`/yoz/${id}`);
       } catch (cause) {
@@ -158,6 +230,28 @@ export function Recorder({ warnings }: { warnings: string[] }) {
     [router, refreshPending],
   );
 
+  /** Asks for the call's sound through the browser's share dialog; null if the user declined. */
+  const requestSystemAudio = async (): Promise<MediaStream | null> => {
+    let display: MediaStream;
+    try {
+      display = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+        // Chrome: offer whole-system audio on Windows, and pre-select sharing a tab's sound.
+        systemAudio: 'include',
+      } as DisplayMediaStreamOptions);
+    } catch {
+      return null;
+    }
+    // Only the sound is recorded; the picture is dropped immediately.
+    display.getVideoTracks().forEach((track) => track.stop());
+    if (display.getAudioTracks().length === 0) {
+      display.getTracks().forEach((track) => track.stop());
+      return null;
+    }
+    return display;
+  };
+
   const start = useCallback(async () => {
     setError(null);
     if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -167,9 +261,9 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       return;
     }
     setPhase('starting');
-    let stream: MediaStream;
+    let mic: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
+      mic = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch {
@@ -179,10 +273,51 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       setPhase('idle');
       return;
     }
-    streamRef.current = stream;
+    streamsRef.current = [mic];
+
+    let system: MediaStream | null = null;
+    if (effectiveMode === 'mic_and_system') {
+      system = await requestSystemAudio();
+      if (!system) {
+        releaseDevices();
+        setError(
+          'Qo‘ng‘iroq ovozi ulashilmadi. Oynada qo‘ng‘iroq tabini (yoki butun ekranni) tanlang va «Ovozni ham ulashish» katakchasini belgilang.',
+        );
+        setPhase('idle');
+        return;
+      }
+      streamsRef.current.push(system);
+    }
+
+    // The microphone and the call's sound are mixed into one track; the meter listens to the mix.
+    let recordStream: MediaStream = mic;
+    let analyser: AnalyserNode | null = null;
+    try {
+      const context = new AudioContext();
+      audioContextRef.current = context;
+      analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      if (system) {
+        const destination = context.createMediaStreamDestination();
+        context.createMediaStreamSource(mic).connect(destination);
+        context.createMediaStreamSource(system).connect(destination);
+        context.createMediaStreamSource(destination.stream).connect(analyser);
+        recordStream = destination.stream;
+      } else {
+        context.createMediaStreamSource(mic).connect(analyser);
+      }
+    } catch {
+      if (system) {
+        releaseDevices();
+        setError('Bu brauzerda qo‘ng‘iroq ovozini aralashtirib bo‘lmadi. Chrome’ni yangilang.');
+        setPhase('idle');
+        return;
+      }
+      // Without an AudioContext only the meter is lost; the microphone still records.
+    }
 
     const mimeType = pickMimeType();
-    const recorder = new MediaRecorder(stream, {
+    const recorder = new MediaRecorder(recordStream, {
       ...(mimeType ? { mimeType } : {}),
       audioBitsPerSecond: 48_000,
     });
@@ -191,9 +326,11 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       startedAt: new Date().toISOString(),
       mimeType: recorder.mimeType || mimeType,
       recordedMs: 0,
+      language,
+      captureMode: effectiveMode,
+      uploadId: null,
       chunks: [],
     };
-    recordingRef.current = recording;
     recorderRef.current = recorder;
 
     const meta = (): LocalRecordingMeta => ({
@@ -202,6 +339,9 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       mimeType: recording.mimeType,
       recordedMs: recording.recordedMs,
       chunkCount: recording.chunks.length,
+      language: recording.language,
+      captureMode: recording.captureMode,
+      uploadId: null,
     });
     // Writes are chained so pieces land in IndexedDB in order and the final details come last.
     let saved: Promise<unknown> = Promise.resolve();
@@ -220,8 +360,9 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       void saved.then(() => send(recording));
     };
     // The microphone can be taken away mid-meeting (a phone call, another app, a lost headset). Stop
-    // cleanly so everything recorded until then is uploaded, and say why.
-    stream.getAudioTracks().forEach((track) => {
+    // cleanly so everything recorded until then is uploaded, and say why. Ending the call's screen
+    // share only removes the call's sound; the microphone keeps recording.
+    mic.getAudioTracks().forEach((track) => {
       track.onended = () => {
         if (recorder.state === 'inactive') return;
         setError(
@@ -235,24 +376,17 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       };
     });
 
-    // Level meter.
-    try {
-      const context = new AudioContext();
-      audioContextRef.current = context;
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 512;
-      context.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Uint8Array(analyser.fftSize);
+    if (analyser) {
+      const meter = analyser;
+      const samples = new Uint8Array(meter.fftSize);
       const tick = () => {
-        analyser.getByteTimeDomainData(samples);
+        meter.getByteTimeDomainData(samples);
         let sum = 0;
         for (const sample of samples) sum += ((sample - 128) / 128) ** 2;
         setLevel(Math.min(1, Math.sqrt(sum / samples.length) * 4));
         frameRef.current = requestAnimationFrame(tick);
       };
       tick();
-    } catch {
-      // The meter is cosmetic; recording works without it.
     }
 
     clockRef.current = { runningSince: performance.now(), accumulated: 0 };
@@ -260,7 +394,7 @@ export function Recorder({ warnings }: { warnings: string[] }) {
     recorder.start(SLICE_MS);
     void acquireWakeLock();
     setPhase('recording');
-  }, [acquireWakeLock, releaseDevices, send]);
+  }, [acquireWakeLock, effectiveMode, language, releaseDevices, send]);
 
   const pause = useCallback(() => {
     const recorder = recorderRef.current;
@@ -310,6 +444,62 @@ export function Recorder({ warnings }: { warnings: string[] }) {
         </div>
       ) : null}
 
+      {phase === 'idle' ? (
+        <div className="mb-6 flex w-full flex-col gap-3">
+          {canCaptureSystemAudio ? (
+            <div
+              className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1"
+              role="radiogroup"
+              aria-label="Uchrashuv turi"
+            >
+              {(
+                [
+                  { value: 'mic', label: 'Xonada', hint: 'mikrofon', icon: Users },
+                  {
+                    value: 'mic_and_system',
+                    label: 'Onlayn qo‘ng‘iroq',
+                    hint: 'Zoom/Meet ovozi ham',
+                    icon: MonitorSpeaker,
+                  },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={captureMode === option.value}
+                  onClick={() => setCaptureMode(option.value)}
+                  className={
+                    captureMode === option.value
+                      ? 'flex flex-col items-center rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm'
+                      : 'flex flex-col items-center rounded-lg px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-800'
+                  }
+                >
+                  <span className="flex items-center gap-1.5">
+                    <option.icon className="h-4 w-4" /> {option.label}
+                  </span>
+                  <span className="text-xs font-normal text-slate-500">{option.hint}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <label className="flex items-center justify-center gap-2 text-sm text-slate-600">
+            Tahlil tili:
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value as Language)}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-slate-900"
+            >
+              {LANGUAGES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
       <div className="relative flex h-64 w-64 items-center justify-center">
         {phase === 'recording' ? (
           <span
@@ -354,9 +544,11 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       >
         {formatTimestamp(elapsedMs)}
       </p>
-      <p className="mt-2 text-sm text-slate-500">
+      <p className="mt-2 text-center text-sm text-slate-500">
         {phase === 'recording'
-          ? 'Yozilmoqda — telefonni stol ustiga qo‘ying'
+          ? effectiveMode === 'mic_and_system'
+            ? 'Yozilmoqda — mikrofon va qo‘ng‘iroq ovozi'
+            : 'Yozilmoqda — ekranni yopmang, telefonni stol ustiga qo‘ying'
           : phase === 'paused'
             ? 'Pauza'
             : phase === 'uploading'

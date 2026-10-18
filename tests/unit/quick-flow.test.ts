@@ -19,7 +19,13 @@ const { ensureProcessing, retrySession, speakerStats } =
   await import('../../apps/web/src/lib/quick/pipeline');
 const { groupWords, speakerLetter, transcribe } =
   await import('../../apps/web/src/lib/quick/transcribe');
-const { transcriptForPrompt } = await import('../../apps/web/src/lib/quick/analyze');
+const {
+  analysisModel,
+  dropUnknownRefs,
+  estimateAnalysisCostUsd,
+  systemPrompt,
+  transcriptForPrompt,
+} = await import('../../apps/web/src/lib/quick/analyze');
 const { accessState, grantAccess } = await import('../../apps/web/src/lib/quick/access');
 const { formatDuration, formatTimestamp } = await import('../../apps/web/src/lib/quick/format');
 
@@ -250,7 +256,7 @@ describe('transcript helpers', () => {
     };
     const prompt = transcriptForPrompt(transcript, speakerStats(transcript));
     expect(prompt).toContain('Davomiyligi: 1:02:05');
-    expect(prompt).toContain('[1:00:00] A: Xayr');
+    expect(prompt).toContain('[#1 1:00:00] A: Xayr');
     expect(prompt).toContain('A (100%)');
   });
 
@@ -258,6 +264,91 @@ describe('transcript helpers', () => {
     expect(formatTimestamp(65_000)).toBe('01:05');
     expect(formatDuration(40_000)).toBe('40 soniya');
     expect(formatDuration(65 * 60_000)).toBe('1 soat 5 daqiqa');
+  });
+});
+
+describe('chunked upload', () => {
+  it('assembles parts in order, overwrites a resent part and reports missing ones', async () => {
+    const { finishUpload, startUpload, uploadedParts, writeUploadPart, MissingPartsError } =
+      await import('../../apps/web/src/lib/quick/store');
+    const uploadId = await startUpload('audio/webm;codecs=opus');
+    await writeUploadPart(uploadId, 1, new Uint8Array([4, 5]));
+    await writeUploadPart(uploadId, 0, new Uint8Array([9]));
+    await writeUploadPart(uploadId, 0, new Uint8Array([1, 2, 3])); // a retried part replaces the first try
+    expect(await uploadedParts(uploadId)).toEqual([0, 1]);
+
+    await expect(
+      finishUpload(uploadId, { partCount: 3, recordedMs: 0, title: null }),
+    ).rejects.toBeInstanceOf(MissingPartsError);
+
+    await writeUploadPart(uploadId, 2, new Uint8Array([6]));
+    const session = await finishUpload(uploadId, {
+      partCount: 3,
+      recordedMs: 5000,
+      title: null,
+      language: 'ru',
+      captureMode: 'mic_and_system',
+    });
+    expect(session.audioBytes).toBe(6);
+    expect(session.language).toBe('ru');
+    expect(session.captureMode).toBe('mic_and_system');
+    const { readAudio } = await import('../../apps/web/src/lib/quick/store');
+    expect([...(await readAudio(session))]).toEqual([1, 2, 3, 4, 5, 6]);
+    // The upload's parts are gone once the session exists.
+    await expect(uploadedParts(uploadId)).rejects.toThrow();
+  });
+});
+
+describe('analysis helpers', () => {
+  it('defaults to the cheapest model and prices Haiku on its two rate cards', () => {
+    vi.stubEnv('ANTHROPIC_MODEL', '');
+    expect(analysisModel()).toBe('claude-haiku-5-5');
+    expect(estimateAnalysisCostUsd('claude-haiku-5-5', 30_000, 10_000)).toBeCloseTo(0.008);
+    expect(estimateAnalysisCostUsd('claude-haiku-5-5', 200_000, 20_000)).toBeCloseTo(0.15);
+    expect(estimateAnalysisCostUsd('claude-opus-5-5', 30_000, 10_000)).toBeCloseTo(0.32);
+    expect(estimateAnalysisCostUsd('some-other-model', 1, 1)).toBeNull();
+  });
+
+  it('writes the analysis in the chosen language', () => {
+    expect(systemPrompt('uz')).toContain('o‘zbek tilida');
+    expect(systemPrompt('ru')).toContain('rus tilida');
+    expect(systemPrompt('en')).toContain('ingliz tilida');
+  });
+
+  it('drops references to transcript lines that do not exist', async () => {
+    vi.stubEnv('SUHBAT_FAKE_AI', '1');
+    const { analyzeTranscript } = await import('../../apps/web/src/lib/quick/analyze');
+    const { analysis } = await analyzeTranscript(
+      { provider: 'fake', languageCode: 'uz', durationMs: 1, utterances: [] },
+      [],
+    );
+    const cleaned = dropUnknownRefs(
+      { ...analysis, decisions: [{ text: 'x', confirmed: true, refs: [0, 2, 9] }] },
+      3,
+    );
+    expect(cleaned.decisions[0]!.refs).toEqual([2]);
+  });
+
+  it('records what a conversation cost', async () => {
+    vi.stubEnv('SUHBAT_FAKE_AI', '1');
+    const session = await createSession({
+      audio,
+      mimeType: 'audio/webm',
+      recordedMs: 0,
+      title: null,
+    });
+    ensureProcessing(session);
+    const done = await waitFor(
+      () => readSession(session.id),
+      (current) => current?.status === 'ready',
+    );
+    expect(done?.usage).toMatchObject({
+      transcriptionProvider: 'fake',
+      transcriptionCostUsd: 0,
+      model: 'fake',
+      analysisCostUsd: 0,
+    });
+    expect(done?.usage?.audioSeconds).toBeGreaterThan(0);
   });
 });
 

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { denyWithoutAccess, error, json } from '../../../../lib/quick/http';
 import { ensureProcessing } from '../../../../lib/quick/pipeline';
 import { audioExtension, createSession, listSessions } from '../../../../lib/quick/store';
+import { analysisLanguageSchema, captureModeSchema } from '../../../../lib/quick/types';
 
 // Two hours of compressed speech is well under this; anything larger is not a meeting recording.
 const MAX_AUDIO_BYTES = 300 * 1024 * 1024;
@@ -42,6 +43,8 @@ export async function POST(request: NextRequest) {
     mimeType,
     recordedMs,
     title,
+    language: analysisLanguageSchema.catch('uz').parse(form.get('language')),
+    captureMode: captureModeSchema.catch('mic').parse(form.get('captureMode')),
   });
   ensureProcessing(session);
   return json({ id: session.id }, 201);

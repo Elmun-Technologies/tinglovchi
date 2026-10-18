@@ -11,7 +11,7 @@ import {
   RotateCcw,
   Trash2,
 } from 'lucide-react';
-import { formatDateTime, formatDuration } from '../../../lib/quick/format';
+import { formatDateTime, formatDuration, formatUsd, totalCostUsd } from '../../../lib/quick/format';
 import type { Session } from '../../../lib/quick/types';
 import { MindMap } from './mind-map';
 import { Overview, summaryAsText } from './overview';
@@ -175,7 +175,9 @@ export function SessionView({ initial }: { initial: Session }) {
             ))}
           </nav>
           <div className="mt-6">
-            {tab === 'overview' ? <Overview session={session} analysis={analysis} /> : null}
+            {tab === 'overview' ? (
+              <Overview session={session} analysis={analysis} onSeek={seek} />
+            ) : null}
             {tab === 'mindmap' ? <MindMap map={analysis.mindMap} /> : null}
             {tab === 'roadmap' ? <Roadmap phases={analysis.roadmap} /> : null}
             {tab === 'slides' ? <Slides session={session} analysis={analysis} /> : null}
@@ -184,6 +186,14 @@ export function SessionView({ initial }: { initial: Session }) {
             ) : null}
           </div>
         </>
+      ) : null}
+      {session.usage ? (
+        <p className="mt-10 text-xs text-slate-400 print:hidden">
+          Tannarx (taxminiy): {formatUsd(totalCostUsd(session.usage) ?? 0)} — transkripsiya{' '}
+          {formatUsd(session.usage.transcriptionCostUsd ?? 0)}, tahlil{' '}
+          {formatUsd(session.usage.analysisCostUsd ?? 0)}
+          {session.usage.model ? ` (${session.usage.model})` : ''}
+        </p>
       ) : null}
     </div>
   );

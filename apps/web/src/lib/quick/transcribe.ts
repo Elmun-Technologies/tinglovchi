@@ -70,6 +70,17 @@ export async function transcribe(
   return transcribeWithAssemblyAI(audio, options);
 }
 
+/**
+ * List price per audio hour, used only to estimate what a conversation cost: AssemblyAI's base model plus
+ * speaker labels, and ElevenLabs Scribe. New AssemblyAI accounts start with free credit.
+ */
+export function transcriptionCostPerHourUsd(provider: string): number | null {
+  if (provider === 'assemblyai') return 0.23;
+  if (provider === 'elevenlabs') return 0.22;
+  if (provider === 'fake') return 0;
+  return null;
+}
+
 /* ------------------------------------------------------------------ helpers */
 
 async function request(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {

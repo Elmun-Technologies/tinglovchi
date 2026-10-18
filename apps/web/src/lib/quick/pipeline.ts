@@ -1,7 +1,7 @@
 import 'server-only';
 import { AnalysisError, analyzeTranscript } from './analyze';
 import { readAudio, readSession, updateSession } from './store';
-import { TranscriptionError, transcribe } from './transcribe';
+import { TranscriptionError, transcribe, transcriptionCostPerHourUsd } from './transcribe';
 import type { Session, SpeakerStat, Transcript } from './types';
 
 /**
@@ -103,8 +103,19 @@ async function step(session: Session): Promise<void> {
       },
     });
     if (transcript.durationMs === 0) transcript.durationMs = session.recordedMs;
+    const audioSeconds = transcript.durationMs / 1000;
+    const perHour = transcriptionCostPerHourUsd(transcript.provider);
     await updateSession(session.id, () => ({
       transcript,
+      usage: {
+        audioSeconds,
+        transcriptionProvider: transcript.provider,
+        transcriptionCostUsd: perHour === null ? null : (audioSeconds / 3600) * perHour,
+        model: null,
+        inputTokens: 0,
+        outputTokens: 0,
+        analysisCostUsd: null,
+      },
       speakerStats: speakerStats(transcript),
       status: 'analyzing',
       attempts: 0,
@@ -118,10 +129,23 @@ async function step(session: Session): Promise<void> {
       await updateSession(session.id, () => ({ status: 'uploaded' }));
       return;
     }
-    const analysis = await analyzeTranscript(session.transcript, session.speakerStats);
-    await updateSession(session.id, () => ({
-      analysis,
-      title: session.title || analysis.title,
+    const result = await analyzeTranscript(
+      session.transcript,
+      session.speakerStats,
+      session.language,
+    );
+    await updateSession(session.id, (current) => ({
+      analysis: result.analysis,
+      title: current.title || result.analysis.title,
+      usage: {
+        audioSeconds: current.usage?.audioSeconds ?? current.transcript!.durationMs / 1000,
+        transcriptionProvider: current.usage?.transcriptionProvider ?? current.transcript!.provider,
+        transcriptionCostUsd: current.usage?.transcriptionCostUsd ?? null,
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        analysisCostUsd: result.costUsd,
+      },
       status: 'ready',
       attempts: 0,
       error: null,

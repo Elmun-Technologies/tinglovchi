@@ -24,3 +24,16 @@ export function formatDateTime(iso: string): string {
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+/** "$0.24" — costs are shown in dollars because the providers bill in dollars. */
+export function formatUsd(value: number): string {
+  return value < 0.01 && value > 0 ? '<$0.01' : `$${value.toFixed(2)}`;
+}
+
+export function totalCostUsd(
+  usage: { transcriptionCostUsd: number | null; analysisCostUsd: number | null } | null,
+): number | null {
+  if (!usage) return null;
+  if (usage.transcriptionCostUsd === null && usage.analysisCostUsd === null) return null;
+  return (usage.transcriptionCostUsd ?? 0) + (usage.analysisCostUsd ?? 0);
+}

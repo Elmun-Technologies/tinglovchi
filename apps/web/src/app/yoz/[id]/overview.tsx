@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { CheckCircle2, CircleDashed } from 'lucide-react';
-import { formatDateTime, formatDuration } from '../../../lib/quick/format';
+import { CheckCircle2, CircleDashed, Play } from 'lucide-react';
+import { formatDateTime, formatDuration, formatTimestamp } from '../../../lib/quick/format';
 import type { Analysis, Session } from '../../../lib/quick/types';
 import { speakerColor, speakerName } from './speakers';
 
@@ -34,7 +34,46 @@ function BriefRow({ label, value }: { label: string; value: string | string[] | 
   );
 }
 
-export function Overview({ session, analysis }: { session: Session; analysis: Analysis }) {
+/** Timestamps where the item was said; clicking one plays the audio from there. */
+function Evidence({
+  refs,
+  session,
+  onSeek,
+}: {
+  refs: number[];
+  session: Session;
+  onSeek: (ms: number) => void;
+}) {
+  const lines = session.transcript?.utterances ?? [];
+  const moments = refs.map((ref) => lines[ref - 1]).filter((line) => line !== undefined);
+  if (moments.length === 0) return null;
+  return (
+    <span className="ml-1 inline-flex flex-wrap gap-1 align-middle print:hidden">
+      {moments.map((line, index) => (
+        <button
+          key={index}
+          type="button"
+          onClick={() => onSeek(line.startMs)}
+          title={line.text}
+          className="inline-flex items-center gap-1 rounded bg-teal-50 px-1.5 py-0.5 font-mono text-[11px] font-normal leading-4 text-teal-800 hover:bg-teal-100"
+        >
+          <Play className="h-2.5 w-2.5 fill-current" />
+          {formatTimestamp(line.startMs)}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+export function Overview({
+  session,
+  analysis,
+  onSeek,
+}: {
+  session: Session;
+  analysis: Analysis;
+  onSeek: (ms: number) => void;
+}) {
   const brief = analysis.clientBrief;
   return (
     <div className="grid gap-5 lg:grid-cols-3">
@@ -52,7 +91,10 @@ export function Overview({ session, analysis }: { session: Session; analysis: An
           <div className="space-y-3">
             {analysis.topics.map((topic, index) => (
               <div key={index}>
-                <p className="font-medium text-slate-900">{topic.title}</p>
+                <p className="font-medium text-slate-900">
+                  {topic.title}
+                  <Evidence refs={topic.refs} session={session} onSeek={onSeek} />
+                </p>
                 <p className="text-sm text-slate-600">{topic.summary}</p>
               </div>
             ))}
@@ -76,6 +118,7 @@ export function Overview({ session, analysis }: { session: Session; analysis: An
                     {decision.confirmed ? null : (
                       <span className="ml-2 text-xs text-amber-700">(taklif, kelishilmagan)</span>
                     )}
+                    <Evidence refs={decision.refs} session={session} onSeek={onSeek} />
                   </span>
                 </li>
               ))}
@@ -99,7 +142,10 @@ export function Overview({ session, analysis }: { session: Session; analysis: An
                 <tbody className="divide-y divide-slate-100">
                   {analysis.tasks.map((task, index) => (
                     <tr key={index}>
-                      <td className="py-2 pr-3 text-slate-900">{task.task}</td>
+                      <td className="py-2 pr-3 text-slate-900">
+                        {task.task}
+                        <Evidence refs={task.refs} session={session} onSeek={onSeek} />
+                      </td>
                       <td className="py-2 pr-3 text-slate-600">{task.owner ?? '—'}</td>
                       <td className="py-2 text-slate-600">{task.deadline ?? '—'}</td>
                     </tr>

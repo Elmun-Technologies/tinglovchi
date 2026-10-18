@@ -1,8 +1,23 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { sessionSchema, type Session, type SessionSummary } from './types';
+import {
+  sessionSchema,
+  type AnalysisLanguage,
+  type CaptureMode,
+  type Session,
+  type SessionSummary,
+} from './types';
 
 /**
  * Disk-backed storage for the one-button flow: `<SUHBAT_DATA_DIR>/sessions/<id>/{session.json,audio.*}`.
@@ -64,41 +79,169 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await rename(temporary, path);
 }
 
-export async function createSession(input: {
-  audio: Uint8Array;
+export type NewSessionFields = {
   mimeType: string;
   recordedMs: number;
   title: string | null;
-}): Promise<Session> {
-  const extension = audioExtension(input.mimeType);
-  if (!extension) throw new Error(`Unsupported audio type: ${input.mimeType}`);
+  language?: AnalysisLanguage;
+  captureMode?: CaptureMode;
+};
 
-  const id = randomUUID();
-  const dir = sessionDir(id);
-  await mkdir(dir, { recursive: true });
-  const audioFile = `audio.${extension}`;
-  await writeFile(join(dir, audioFile), input.audio);
-
+async function writeNewSession(
+  id: string,
+  fields: NewSessionFields,
+  audioFile: string,
+  audioBytes: number,
+): Promise<Session> {
   const now = new Date().toISOString();
   const session: Session = {
     id,
     createdAt: now,
     updatedAt: now,
     status: 'uploaded',
-    title: input.title,
+    title: fields.title,
     audioFile,
-    audioMimeType: input.mimeType.split(';')[0]!.trim().toLowerCase(),
-    audioBytes: input.audio.byteLength,
-    recordedMs: input.recordedMs,
+    audioMimeType: fields.mimeType.split(';')[0]!.trim().toLowerCase(),
+    audioBytes,
+    recordedMs: fields.recordedMs,
+    language: fields.language ?? 'uz',
+    captureMode: fields.captureMode ?? 'mic',
     providerJobId: null,
     transcript: null,
     speakerStats: [],
     analysis: null,
+    usage: null,
     error: null,
     attempts: 0,
   };
-  await writeJsonAtomic(join(dir, 'session.json'), session);
+  await writeJsonAtomic(join(sessionDir(id), 'session.json'), session);
   return session;
+}
+
+export async function createSession(
+  input: NewSessionFields & { audio: Uint8Array },
+): Promise<Session> {
+  const extension = audioExtension(input.mimeType);
+  if (!extension) throw new Error(`Unsupported audio type: ${input.mimeType}`);
+
+  const id = randomUUID();
+  await mkdir(sessionDir(id), { recursive: true });
+  const audioFile = `audio.${extension}`;
+  await writeFile(join(sessionDir(id), audioFile), input.audio);
+  return writeNewSession(id, input, audioFile, input.audio.byteLength);
+}
+
+/* ------------------------------------------------------- chunked uploads
+ * A multi-hour recording is sent in parts so a dropped mobile connection costs one part, not the whole
+ * upload. Parts land in `<data>/uploads/<id>/`, and finishing concatenates them into a new session.
+ */
+
+function uploadDir(id: string): string {
+  if (!isSessionId(id)) throw new Error('Invalid upload id.');
+  return join(dataDir(), 'uploads', id);
+}
+
+const PART_DIGITS = 6;
+
+function partName(index: number): string {
+  return `part-${String(index).padStart(PART_DIGITS, '0')}`;
+}
+
+const ABANDONED_UPLOAD_MS = 7 * 24 * 60 * 60_000;
+
+/** Removes uploads nobody finished within a week; the recording is still on the device that made it. */
+async function purgeAbandonedUploads(): Promise<void> {
+  const root = join(dataDir(), 'uploads');
+  const entries = await readdir(root).catch(() => [] as string[]);
+  const cutoff = Date.now() - ABANDONED_UPLOAD_MS;
+  await Promise.all(
+    entries.filter(isSessionId).map(async (id) => {
+      const info = await stat(join(root, id)).catch(() => null);
+      if (info && info.mtimeMs < cutoff) await rm(join(root, id), { recursive: true, force: true });
+    }),
+  );
+}
+
+export async function startUpload(mimeType: string): Promise<string> {
+  if (!audioExtension(mimeType)) throw new Error(`Unsupported audio type: ${mimeType}`);
+  await purgeAbandonedUploads();
+  const id = randomUUID();
+  await mkdir(uploadDir(id), { recursive: true });
+  await writeJsonAtomic(join(uploadDir(id), 'upload.json'), {
+    mimeType,
+    createdAt: new Date().toISOString(),
+  });
+  return id;
+}
+
+export async function uploadExists(id: string): Promise<boolean> {
+  if (!isSessionId(id)) return false;
+  return stat(join(uploadDir(id), 'upload.json')).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** Writes one part; re-sending the same index overwrites it, so a retried part is never duplicated. */
+export async function writeUploadPart(id: string, index: number, bytes: Uint8Array): Promise<void> {
+  if (!Number.isInteger(index) || index < 0 || index >= 10 ** PART_DIGITS) {
+    throw new Error('Invalid part index.');
+  }
+  const temporary = join(uploadDir(id), `${partName(index)}.${randomUUID()}.tmp`);
+  await writeFile(temporary, bytes);
+  await rename(temporary, join(uploadDir(id), partName(index)));
+}
+
+/** Indexes of the parts already stored, so a client can resume after a reload. */
+export async function uploadedParts(id: string): Promise<number[]> {
+  const entries = await readdir(uploadDir(id));
+  return entries
+    .filter((name) => /^part-\d+$/.test(name))
+    .map((name) => Number(name.slice(5)))
+    .sort((a, b) => a - b);
+}
+
+export async function finishUpload(
+  id: string,
+  fields: Omit<NewSessionFields, 'mimeType'> & { partCount: number },
+): Promise<Session> {
+  const dir = uploadDir(id);
+  const meta = JSON.parse(await readFile(join(dir, 'upload.json'), 'utf8')) as { mimeType: string };
+  const present = new Set(await uploadedParts(id));
+  const missing: number[] = [];
+  for (let index = 0; index < fields.partCount; index += 1) {
+    if (!present.has(index)) missing.push(index);
+  }
+  if (fields.partCount < 1 || missing.length > 0) {
+    throw new MissingPartsError(missing);
+  }
+
+  const extension = audioExtension(meta.mimeType)!;
+  const sessionId = randomUUID();
+  await mkdir(sessionDir(sessionId), { recursive: true });
+  const audioFile = `audio.${extension}`;
+  const target = join(sessionDir(sessionId), audioFile);
+  let total = 0;
+  for (let index = 0; index < fields.partCount; index += 1) {
+    const bytes = await readFile(join(dir, partName(index)));
+    await appendFile(target, bytes);
+    total += bytes.byteLength;
+  }
+  const session = await writeNewSession(
+    sessionId,
+    { ...fields, mimeType: meta.mimeType },
+    audioFile,
+    total,
+  );
+  await rm(dir, { recursive: true, force: true });
+  return session;
+}
+
+export class MissingPartsError extends Error {
+  constructor(readonly missing: number[]) {
+    super(`Upload is missing parts: ${missing.slice(0, 20).join(', ')}`);
+    this.name = 'MissingPartsError';
+  }
 }
 
 export async function readSession(id: string): Promise<Session | null> {
@@ -153,12 +296,13 @@ export async function listSessions(): Promise<SessionSummary[]> {
   return sessions
     .filter((session): session is Session => session !== null)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map(({ id, createdAt, status, title, recordedMs, error }) => ({
+    .map(({ id, createdAt, status, title, recordedMs, error, usage }) => ({
       id,
       createdAt,
       status,
       title,
       recordedMs,
       error,
+      usage,
     }));
 }

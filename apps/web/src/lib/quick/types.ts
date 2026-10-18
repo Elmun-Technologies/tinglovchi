@@ -57,12 +57,18 @@ export const analysisSchema = z.object({
     z.object({
       title: z.string(),
       summary: z.string(),
+      refs: z
+        .array(z.number().int())
+        .describe('Shu fikr aytilgan transkript qatorlari raqamlari (#), 1-3 ta'),
     }),
   ),
   decisions: z.array(
     z.object({
       text: z.string(),
       confirmed: z.boolean().describe('Aniq kelishilgan bo‘lsa true, faqat taklif bo‘lsa false'),
+      refs: z
+        .array(z.number().int())
+        .describe('Shu fikr aytilgan transkript qatorlari raqamlari (#), 1-3 ta'),
     }),
   ),
   tasks: z.array(
@@ -70,6 +76,9 @@ export const analysisSchema = z.object({
       task: z.string(),
       owner: z.string().nullable().describe('Kim bajaradi; aytilmagan bo‘lsa null'),
       deadline: z.string().nullable().describe('Aytilgan muddat; aytilmagan bo‘lsa null'),
+      refs: z
+        .array(z.number().int())
+        .describe('Shu fikr aytilgan transkript qatorlari raqamlari (#), 1-3 ta'),
     }),
   ),
   clientBrief: z.object({
@@ -119,6 +128,24 @@ export const speakerStatSchema = z.object({
 });
 export type SpeakerStat = z.infer<typeof speakerStatSchema>;
 
+export const analysisLanguageSchema = z.enum(['uz', 'ru', 'en']);
+export type AnalysisLanguage = z.infer<typeof analysisLanguageSchema>;
+
+export const captureModeSchema = z.enum(['mic', 'mic_and_system']);
+export type CaptureMode = z.infer<typeof captureModeSchema>;
+
+/** What a session cost to process, for pricing decisions; estimated from the providers' list prices. */
+export const usageSchema = z.object({
+  audioSeconds: z.number().nonnegative(),
+  transcriptionProvider: z.string(),
+  transcriptionCostUsd: z.number().nonnegative().nullable(),
+  model: z.string().nullable(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  analysisCostUsd: z.number().nonnegative().nullable(),
+});
+export type Usage = z.infer<typeof usageSchema>;
+
 export const sessionSchema = z.object({
   id: z.string(),
   createdAt: z.string(),
@@ -129,11 +156,14 @@ export const sessionSchema = z.object({
   audioMimeType: z.string(),
   audioBytes: z.number().int().nonnegative(),
   recordedMs: z.number().nonnegative(),
+  language: analysisLanguageSchema.default('uz'),
+  captureMode: captureModeSchema.default('mic'),
   /** The transcription provider's job id, kept so a retry polls it instead of paying again. */
   providerJobId: z.string().nullable().default(null),
   transcript: transcriptSchema.nullable(),
   speakerStats: z.array(speakerStatSchema),
   analysis: analysisSchema.nullable(),
+  usage: usageSchema.nullable().default(null),
   error: z.string().nullable(),
   attempts: z.number().int().nonnegative(),
 });
@@ -142,5 +172,5 @@ export type Session = z.infer<typeof sessionSchema>;
 /** What the list endpoint returns: no transcript or analysis bodies. */
 export type SessionSummary = Pick<
   Session,
-  'id' | 'createdAt' | 'status' | 'title' | 'recordedMs' | 'error'
+  'id' | 'createdAt' | 'status' | 'title' | 'recordedMs' | 'error' | 'usage'
 >;

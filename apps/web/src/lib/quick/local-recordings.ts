@@ -17,6 +17,10 @@ export type LocalRecordingMeta = {
   mimeType: string;
   recordedMs: number;
   chunkCount: number;
+  language?: 'uz' | 'ru' | 'en';
+  captureMode?: 'mic' | 'mic_and_system';
+  /** Set once a chunked upload has started, so a retry resumes it instead of starting over. */
+  uploadId?: string | null;
 };
 
 export type LocalRecording = Omit<LocalRecordingMeta, 'chunkCount'> & { chunks: Blob[] };
@@ -89,6 +93,9 @@ export async function loadLocalRecording(id: string): Promise<LocalRecording | n
     startedAt: meta.startedAt,
     mimeType: meta.mimeType,
     recordedMs: meta.recordedMs,
+    language: meta.language,
+    captureMode: meta.captureMode,
+    uploadId: meta.uploadId ?? null,
     chunks: (chunks ?? []).sort((a, b) => a.index - b.index).map((chunk) => chunk.blob),
   };
 }
