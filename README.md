@@ -1,5 +1,8 @@
 # SUHBAT AI
 
+> **Tez boshlash:** bitta tugmali yozib olish va tahlil (`/yoz`) — [docs/ISHGA-TUSHIRISH.md](docs/ISHGA-TUSHIRISH.md).
+> Texnik audit — [docs/audit-2026-10.md](docs/audit-2026-10.md).
+
 **SUHBAT AI** (`suhbat-ai`) is a company meeting-memory platform: it organizes conversations by workspace, company, and project, then evolves them into evidence-linked organizational knowledge. The product name is configurable through `NEXT_PUBLIC_APP_NAME`; it is not a domain identifier.
 
 ## Two products, separate entry points

@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
     '@suhbat/recording-api',
   ],
   allowedDevOrigins: ['*.e2b.app'],
+  // Do not write AGENTS.md / CLAUDE.md into the app directory on `next dev`.
+  agentRules: false,
 };
 
 export default nextConfig;

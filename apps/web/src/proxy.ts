@@ -29,5 +29,9 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  // `api/quick` is excluded: the one-button recorder needs no Supabase session, and a route behind the proxy
+  // gets its request body capped (10 MB by default), which an hour-long recording exceeds.
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|api/quick|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 };

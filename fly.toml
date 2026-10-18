@@ -11,13 +11,23 @@ primary_region = "fra"
 [env]
   APP_URL = "https://tinglovchi-staging-web.fly.dev"
   SUHBAT_DATA_MODE = "live"
+  # One-button recorder (/yoz): recordings and analyses live on the volume below.
+  SUHBAT_DATA_DIR = "/data"
+  TRANSCRIPTION_PROVIDER = "assemblyai"
+
+# Create once: fly volumes create suhbat_data --region fra --size 10
+[mounts]
+  source = "suhbat_data"
+  destination = "/data"
 
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = "stop"
+  # Analysis runs inside the web process after an upload; a stopped machine would pause it until the next
+  # visit, so keep one machine running.
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
 [[vm]]

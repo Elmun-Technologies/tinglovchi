@@ -22,6 +22,10 @@ export default async function HomePage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  // The one-button recorder is the product's front door; the workspace dashboard stays available for
+  // deployments that opt into it with SUHBAT_HOME=dashboard.
+  if (process.env.SUHBAT_HOME?.trim() !== 'dashboard') redirect('/yoz');
+
   const params = await searchParams;
 
   if (!isSupabaseConfigured()) {
