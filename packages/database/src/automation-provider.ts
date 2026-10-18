@@ -504,9 +504,7 @@ export class HttpBusinessAutomationProvider implements BusinessAutomationProvide
             'x-suhbat-meeting-id': request.meetingId,
             'x-suhbat-action-id': request.actionId,
             'x-suhbat-payload-sha256': request.payloadSha256,
-            ...(sameOrigin && this.signingSecret
-              ? { 'x-suhbat-webhook-secret': this.signingSecret }
-              : {}),
+            // Only the HMAC goes out: the endpoint is tenant-chosen, so the shared secret itself must not.
             ...(sameOrigin && signatureHeader ? { 'x-suhbat-signature-256': signatureHeader } : {}),
           },
           body: bodyJson,

@@ -285,3 +285,12 @@ describe('the runtime resolver is split by capability', () => {
     }
   });
 });
+
+describe('the request-scoped Supabase client', () => {
+  it('is built per request, never cached at module scope', () => {
+    // A cached client keeps the first caller's cookies, so every later request would act as that user.
+    const source = code(read('apps/web/src/lib/api-v1-runtime.ts'));
+    expect(source).toMatch(/createSupabaseServerClient\(\)/);
+    expect(source).not.toMatch(/^let\s+\w*[Cc]lient\w*\s*:/m);
+  });
+});

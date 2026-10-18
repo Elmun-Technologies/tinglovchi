@@ -203,7 +203,7 @@ describe('Phase 9 Business Automation contracts & provider unit tests', () => {
     expect(res.externalReferenceId).toBe('crm_deal_991');
     expect(capturedHeaders?.get('idempotency-key')).toBe('idem-crm-summary-0003');
     expect(capturedHeaders?.get('x-suhbat-payload-sha256')).toBe('c'.repeat(64));
-    expect(capturedHeaders?.get('x-suhbat-webhook-secret')).toBe('wh-sign-secret');
+    expect(capturedHeaders?.get('x-suhbat-webhook-secret')).toBeNull();
   });
 
   it('enforces comprehensive SSRF protections (IPv4/IPv6 ranges, IPv4-mapped IPv6, alternate IP encodings, DNS rebinding, and redirect revalidation)', async () => {
