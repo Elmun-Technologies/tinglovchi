@@ -226,10 +226,12 @@ export type DurableNonceStore = NonceStore & {
  * The store is capped, and when it overflows it drops the oldest entries rather than growing without
  * bound — an attacker who can mint nonces must not be able to exhaust memory.
  */
-export function createNonceStore(options: {
-  ttlMs?: number;
-  maxEntries?: number;
-} = {}): NonceStore {
+export function createNonceStore(
+  options: {
+    ttlMs?: number;
+    maxEntries?: number;
+  } = {},
+): NonceStore {
   const ttlMs = options.ttlMs ?? DEFAULT_CLOCK_SKEW_MS * 2;
   const maxEntries = options.maxEntries ?? 10_000;
   const seen = new Map<string, number>();
@@ -346,16 +348,18 @@ export type VerifyOptions = {
  * So the ledger only ever records a nonce that arrived attached to a signature this service itself
  * verified. Nothing an unauthenticated caller sends can consume anything.
  */
-export async function verifyInternalRequest(
-  options: VerifyOptions,
-): Promise<VerificationResult> {
+export async function verifyInternalRequest(options: VerifyOptions): Promise<VerificationResult> {
   const now = options.now ?? Date.now();
   const clockSkewMs = options.clockSkewMs ?? DEFAULT_CLOCK_SKEW_MS;
 
   // 1. Parse the service-auth headers.
   const signatureHeader = options.headers.get(SIGNATURE_HEADER);
   if (!signatureHeader) {
-    return { ok: false, code: 'missing_signature', message: 'Internal service signature is required.' };
+    return {
+      ok: false,
+      code: 'missing_signature',
+      message: 'Internal service signature is required.',
+    };
   }
 
   const separator = signatureHeader.indexOf('=');
@@ -375,7 +379,11 @@ export async function verifyInternalRequest(
   const userId = (options.headers.get(USER_ID_HEADER) ?? '').trim();
 
   if (!userId) {
-    return { ok: false, code: 'missing_user', message: 'Internal request carries no user identity.' };
+    return {
+      ok: false,
+      code: 'missing_user',
+      message: 'Internal request carries no user identity.',
+    };
   }
 
   // 2. Validate the timestamp window.
@@ -409,7 +417,11 @@ export async function verifyInternalRequest(
 
   // 4. Only now claim the nonce. Everything above this line can fail without touching the ledger.
   if (!(await options.nonceStore.consume(nonce, key.keyId))) {
-    return { ok: false, code: 'replayed_nonce', message: 'Internal request has already been used.' };
+    return {
+      ok: false,
+      code: 'replayed_nonce',
+      message: 'Internal request has already been used.',
+    };
   }
 
   return { ok: true, userId, keyId: key.keyId };
@@ -435,9 +447,7 @@ const NEVER_LOGGED_HEADERS = new Set([
   'x-suhbat-connect-code',
 ]);
 
-export function redactHeaders(
-  headers: Iterable<[string, unknown]>,
-): Record<string, string> {
+export function redactHeaders(headers: Iterable<[string, unknown]>): Record<string, string> {
   const output: Record<string, string> = {};
   for (const [name, value] of headers) {
     const lower = name.toLowerCase();

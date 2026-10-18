@@ -26,7 +26,6 @@ import {
   type DesktopConnectCodeResponse,
   type DesktopSessionInfoResponse,
   type DesktopSessionResponse,
-  type RefreshDesktopSessionRequestInput,
   type RefreshDesktopSessionResponse,
   type DesktopWorkspaceListResponse,
   type FinalizeRecordingRequestInput,
@@ -165,7 +164,11 @@ export function createCloudClient(options: CloudClientOptions) {
     const timer = setTimeout(() => controller.abort(), callTimeout ?? timeoutMs);
     let response: Response;
     try {
-      response = await doFetch(`${base}${path}`, { ...request, headers, signal: controller.signal });
+      response = await doFetch(`${base}${path}`, {
+        ...request,
+        headers,
+        signal: controller.signal,
+      });
     } catch (cause) {
       if (cause instanceof Error && cause.name === 'AbortError') {
         throw new CloudError('timeout', `${what} timed out.`, null, true);
@@ -185,16 +188,31 @@ export function createCloudClient(options: CloudClientOptions) {
     const text = await response.text();
     if (!response.ok) {
       const code = codeForStatus(response.status);
-      throw new CloudError(code, messageFromErrorBody(text) ?? `${what} failed.`, response.status, retryableFor(code, response.status));
+      throw new CloudError(
+        code,
+        messageFromErrorBody(text) ?? `${what} failed.`,
+        response.status,
+        retryableFor(code, response.status),
+      );
     }
     if (!text.trim()) {
-      throw new CloudError('server_error', `${what} returned an empty response.`, response.status, true);
+      throw new CloudError(
+        'server_error',
+        `${what} returned an empty response.`,
+        response.status,
+        true,
+      );
     }
     let json: unknown;
     try {
       json = JSON.parse(text);
     } catch {
-      throw new CloudError('server_error', `${what} returned a response that was not JSON.`, response.status, true);
+      throw new CloudError(
+        'server_error',
+        `${what} returned a response that was not JSON.`,
+        response.status,
+        true,
+      );
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) throw new CloudContractError(what, parsed.error);
@@ -247,7 +265,12 @@ export function createCloudClient(options: CloudClientOptions) {
     refreshSession: async (refreshToken: string): Promise<RefreshDesktopSessionResponse> => {
       const parsed = refreshDesktopSessionRequestSchema.safeParse({ refreshToken });
       if (!parsed.success) {
-        throw new CloudError('validation_failed', 'That is not a valid refresh token.', null, false);
+        throw new CloudError(
+          'validation_failed',
+          'That is not a valid refresh token.',
+          null,
+          false,
+        );
       }
       return call('session refresh', '/api/v1/desktop/sessions/refresh', {
         method: 'POST',
@@ -301,10 +324,14 @@ export function createCloudClient(options: CloudClientOptions) {
       }) as Promise<CreateMeetingResponse>,
 
     getMeetingProcessing: (meetingId: string, workspaceId?: string) =>
-      call('processing state', `/api/v1/meetings/${meetingId}/processing${workspaceId ? `?workspaceId=${workspaceId}` : ''}`, {
-        method: 'GET',
-        schema: meetingProcessingResponseSchema,
-      }) as Promise<MeetingProcessingResponse>,
+      call(
+        'processing state',
+        `/api/v1/meetings/${meetingId}/processing${workspaceId ? `?workspaceId=${workspaceId}` : ''}`,
+        {
+          method: 'GET',
+          schema: meetingProcessingResponseSchema,
+        },
+      ) as Promise<MeetingProcessingResponse>,
 
     createRecording: (input: CreateRecordingRequestInput) =>
       call('recording', '/api/v1/recordings', {
@@ -363,7 +390,10 @@ export function createCloudClient(options: CloudClientOptions) {
      * our API, so it must not carry the session token. A signed URL is a bearer capability — sending
      * our long-lived session to a storage endpoint would leak it into that host's logs.
      */
-    uploadChunkBytes: async (authorization: ChunkUploadAuthorizationDto, bytes: Uint8Array): Promise<void> => {
+    uploadChunkBytes: async (
+      authorization: ChunkUploadAuthorizationDto,
+      bytes: Uint8Array,
+    ): Promise<void> => {
       const headers = new Headers();
       for (const [name, value] of Object.entries(authorization.headers)) {
         headers.set(name, value);
@@ -393,8 +423,14 @@ export function createCloudClient(options: CloudClientOptions) {
       }
       if (!response.ok) {
         // 403 from a signed URL almost always means it expired in flight; the caller re-authorizes.
-        const code: CloudErrorCode = response.status === 403 || response.status === 401 ? 'unauthorized' : 'server_error';
-        throw new CloudError(code, `Storage rejected the upload (${response.status}).`, response.status, true);
+        const code: CloudErrorCode =
+          response.status === 403 || response.status === 401 ? 'unauthorized' : 'server_error';
+        throw new CloudError(
+          code,
+          `Storage rejected the upload (${response.status}).`,
+          response.status,
+          true,
+        );
       }
     },
   };
@@ -431,7 +467,10 @@ export function cloudBaseUrl(env: Record<string, string | undefined>): string | 
     return null;
   }
   if (url.protocol === 'https:') return `${url.protocol}//${url.host}`;
-  if (url.protocol === 'http:' && LOOPBACK_HOSTS.includes(url.hostname as (typeof LOOPBACK_HOSTS)[number])) {
+  if (
+    url.protocol === 'http:' &&
+    LOOPBACK_HOSTS.includes(url.hostname as (typeof LOOPBACK_HOSTS)[number])
+  ) {
     return `${url.protocol}//${url.host}`;
   }
   return null;

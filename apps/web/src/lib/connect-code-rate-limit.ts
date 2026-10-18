@@ -51,7 +51,10 @@ function take(window: Window, limit: number): Budget {
     window.resetAt = now + WINDOW_MS;
   }
   if (window.count >= limit) {
-    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((window.resetAt - now) / 1000)) };
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((window.resetAt - now) / 1000)),
+    };
   }
   window.count += 1;
   return { allowed: true };

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,11 +22,9 @@ import { validateProductionEnvironment } from '../../packages/database/src/produ
  */
 
 const ROOT = join(__dirname, '..', '..');
-const WEB = join(ROOT, 'apps', 'web');
 
 /** Every source file in the web app. */
 function webFiles(): string[] {
-  const { execSync } = require('node:child_process') as typeof import('node:child_process');
   const output = execSync(
     `find apps/web/src apps/web/*.ts apps/web/*.mjs apps/web/*.js -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.mjs' \\) 2>/dev/null || true`,
     { cwd: ROOT, encoding: 'utf8' },
@@ -53,16 +52,12 @@ describe('the web app never reaches for a privileged database credential', () =>
   });
 
   it('no web file reads SUPABASE_DB_URL', () => {
-    const offenders = FILES.filter((file) =>
-      /SUPABASE_DB_URL/.test(code(read(file))),
-    );
+    const offenders = FILES.filter((file) => /SUPABASE_DB_URL/.test(code(read(file))));
     expect(offenders).toEqual([]);
   });
 
   it('no web file reads SUPABASE_SERVICE_ROLE_KEY', () => {
-    const offenders = FILES.filter((file) =>
-      /SUPABASE_SERVICE_ROLE_KEY/.test(code(read(file))),
-    );
+    const offenders = FILES.filter((file) => /SUPABASE_SERVICE_ROLE_KEY/.test(code(read(file))));
     expect(offenders).toEqual([]);
   });
 
@@ -75,7 +70,9 @@ describe('the web app never reaches for a privileged database credential', () =>
 
   it('no web file imports the pg driver directly', () => {
     const offenders = FILES.filter((file) =>
-      /from\s+['"]pg['"]|require\(\s*['"]pg['"]\s*\)|from\s+['"]postgres['"]/.test(code(read(file))),
+      /from\s+['"]pg['"]|require\(\s*['"]pg['"]\s*\)|from\s+['"]postgres['"]/.test(
+        code(read(file)),
+      ),
     );
     expect(offenders).toEqual([]);
   });
@@ -96,13 +93,18 @@ describe('the privileged executor refuses to be built by the web', () => {
     await expect(
       // @ts-expect-error deliberately passing a role that must never be accepted
       getWorkerExecutor({ role: 'web' }),
-    ).rejects.toThrow(/Only the privileged services \(recording-api, worker\) may create a database executor/);
+    ).rejects.toThrow(
+      /Only the privileged services \(recording-api, worker\) may create a database executor/,
+    );
   });
 
   it('refuses in production when the process declares itself the web role', async () => {
     const { getWorkerExecutor } = await import('../../packages/database/src/worker-executor');
     await expect(
-      getWorkerExecutor({ role: 'worker', env: { NODE_ENV: 'production', SUHBAT_RUNTIME_ROLE: 'web' } }),
+      getWorkerExecutor({
+        role: 'worker',
+        env: { NODE_ENV: 'production', SUHBAT_RUNTIME_ROLE: 'web' },
+      }),
     ).rejects.toThrow(/SUHBAT_RUNTIME_ROLE=web, which forbids SUPABASE_DB_URL/);
   });
 
@@ -281,5 +283,14 @@ describe('the runtime resolver is split by capability', () => {
         /resolvePipelineContext/,
       );
     }
+  });
+});
+
+describe('the request-scoped Supabase client', () => {
+  it('is built per request, never cached at module scope', () => {
+    // A cached client keeps the first caller's cookies, so every later request would act as that user.
+    const source = code(read('apps/web/src/lib/api-v1-runtime.ts'));
+    expect(source).toMatch(/createSupabaseServerClient\(\)/);
+    expect(source).not.toMatch(/^let\s+\w*[Cc]lient\w*\s*:/m);
   });
 });

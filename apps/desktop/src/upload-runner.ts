@@ -48,8 +48,10 @@ export function createUploadNetworkAdapter(cloud: CloudClient): DesktopUploadNet
     createRecording: (input) => cloud.createRecording(input),
     registerSource: (recordingId, input) => cloud.registerSource(recordingId, input),
     registerChunk: (recordingId, input) => cloud.registerChunk(recordingId, input),
-    authorizeChunkUpload: (recordingId, chunkId) => cloud.authorizeChunkUpload(recordingId, chunkId),
-    uploadChunkBytesToStorage: (authorization, bytes) => cloud.uploadChunkBytes(authorization, bytes),
+    authorizeChunkUpload: (recordingId, chunkId) =>
+      cloud.authorizeChunkUpload(recordingId, chunkId),
+    uploadChunkBytesToStorage: (authorization, bytes) =>
+      cloud.uploadChunkBytes(authorization, bytes),
     verifyChunkUpload: (recordingId, chunkId) => cloud.verifyChunkUpload(recordingId, chunkId),
     finalizeRecording: (recordingId, input) => cloud.finalizeRecording(recordingId, input),
     getRecording: (recordingId) => cloud.getRecording(recordingId),
@@ -112,7 +114,11 @@ export function createUploadRunner(options: {
       if (inFlight) return { kind: 'in_progress', progress: lastProgress } satisfies UploadOutcome;
 
       if (current.counts.total === 0) {
-        return { kind: 'blocked', progress: lastProgress, reason: 'no_finalized_chunks' } satisfies UploadOutcome;
+        return {
+          kind: 'blocked',
+          progress: lastProgress,
+          reason: 'no_finalized_chunks',
+        } satisfies UploadOutcome;
       }
       if (options.hasNetwork && !options.hasNetwork()) {
         return { kind: 'offline', progress: lastProgress } satisfies UploadOutcome;
@@ -123,7 +129,10 @@ export function createUploadRunner(options: {
         const snapshot = await queue.processQueue(nowMs);
         lastProgress = progressOf(snapshot);
 
-        if (lastProgress.failed > 0 && lastProgress.verified + lastProgress.failed >= lastProgress.total) {
+        if (
+          lastProgress.failed > 0 &&
+          lastProgress.verified + lastProgress.failed >= lastProgress.total
+        ) {
           // Everything that could be attempted has been, and some of it failed. Report it as offline
           // so the UI keeps the meeting safe on disk and retries on the next poll.
           return { kind: 'offline', progress: lastProgress } satisfies UploadOutcome;
@@ -156,9 +165,13 @@ export function isOfflineError(cause: unknown): boolean {
     return cause.code === 'offline' || cause.code === 'timeout' || cause.retryable;
   }
   if (cause instanceof UploadTransportError) {
-    return ['offline', 'network_loss', 'timeout', 'upload_url_expired', 'storage_transient_error'].includes(
-      cause.code,
-    );
+    return [
+      'offline',
+      'network_loss',
+      'timeout',
+      'upload_url_expired',
+      'storage_transient_error',
+    ].includes(cause.code);
   }
   // A bare `TypeError` is what a browser and Tauri's fetch shim both throw when the socket never
   // opens. Classifying it as offline here means the guarantee "no network never loses audio" holds

@@ -6,10 +6,10 @@ normative: if a change contradicts it, the change is wrong until this document i
 Two rules anchor everything below, both taken from
 [`production-readiness.md`](production-readiness.md):
 
-| Secret | Web / API | Worker |
-| --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Yes |
-| `SUPABASE_DB_URL`, `SUPABASE_SERVICE_ROLE_KEY` | **No (Forbidden in Web)** | Yes |
+| Secret                                                      | Web / API                 | Worker |
+| ----------------------------------------------------------- | ------------------------- | ------ |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes                       | Yes    |
+| `SUPABASE_DB_URL`, `SUPABASE_SERVICE_ROLE_KEY`              | **No (Forbidden in Web)** | Yes    |
 
 ---
 
@@ -37,8 +37,9 @@ The database URL and the service-role key are read only by:
 The two privileged roles are deliberately separate deployments: the one a request can reach
 (`recording-api`) holds no AssemblyAI or OpenAI key, and the one that holds those keys (`worker`) is
 not reachable from a request at all. See [deployment-topology.md](deployment-topology.md).
+
 - `packages/database/src/production-env.ts` — the fail-closed audit. Since this pass it also checks
-  the *reverse* direction: `role: 'web'` **fails** when `SUPABASE_DB_URL` or
+  the _reverse_ direction: `role: 'web'` **fails** when `SUPABASE_DB_URL` or
   `SUPABASE_SERVICE_ROLE_KEY` is present, so a misconfigured deployment is caught at boot instead of
   silently running with an owner credential.
 
@@ -95,12 +96,12 @@ access, and there is no way to rotate it.
 
 Two opaque credentials, minted together, with different jobs.
 
-| | Access token | Refresh token |
-| --- | --- | --- |
-| Entropy | 256 bits, base64url | 256 bits, base64url |
-| Lifetime | **15 minutes** | **30 days** |
-| Sent to | every ordinary endpoint | `POST /api/v1/desktop/sessions/refresh` **only** |
-| Stored as | `sha256` hex | `sha256` hex |
+|                  | Access token                                         | Refresh token                                         |
+| ---------------- | ---------------------------------------------------- | ----------------------------------------------------- |
+| Entropy          | 256 bits, base64url                                  | 256 bits, base64url                                   |
+| Lifetime         | **15 minutes**                                       | **30 days**                                           |
+| Sent to          | every ordinary endpoint                              | `POST /api/v1/desktop/sessions/refresh` **only**      |
+| Stored as        | `sha256` hex                                         | `sha256` hex                                          |
 | Lifetime columns | `desktop_sessions.access_token_hash` / `_expires_at` | `desktop_sessions.refresh_token_hash` / `_expires_at` |
 
 Neither is ever stored in plaintext. A database read yields hashes only.
@@ -141,7 +142,7 @@ immediately. An expired-but-unrevoked refresh token cannot be refreshed.
 - **Steady state:** a 30-second timer refreshes only when the access token actually needs it and no
   upload is in flight (`uploadingRef.current`), so a renewal can never swap credentials underneath a
   signed-URL upload.
-- **Renewal failure:** credentials are dropped, the session is *not* declared signed out, and the UI
+- **Renewal failure:** credentials are dropped, the session is _not_ declared signed out, and the UI
   is told `session_expired`. In `flow.ts`, that action moves to `signed_out` **only when no recording
   is live** (`phase ∉ {starting, recording, paused, stopping}`); during a recording it just raises
   the notice. An auth event must never steal the Stop button.
@@ -237,11 +238,11 @@ raise this with it.
 
 `apps/web/src/lib/api-v1-runtime.ts` now exposes three resolvers:
 
-| Resolver | Builds | Used by |
-| --- | --- | --- |
-| `resolveDesktopContext` | a `DesktopClientService` only | `POST /desktop/connect-codes`, `POST /desktop/sessions`, `/sessions/refresh`, `/session/workspace`, `POST /meetings`, `GET /workspaces` |
-| `resolvePipelineContext` | storage + transcription + intelligence + embedding + Telegram + automation | recording upload and processing endpoints |
-| `resolveApiContext` | everything, for routes that predate the split | remaining Phase 4–9 routes |
+| Resolver                 | Builds                                                                     | Used by                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolveDesktopContext`  | a `DesktopClientService` only                                              | `POST /desktop/connect-codes`, `POST /desktop/sessions`, `/sessions/refresh`, `/session/workspace`, `POST /meetings`, `GET /workspaces` |
+| `resolvePipelineContext` | storage + transcription + intelligence + embedding + Telegram + automation | recording upload and processing endpoints                                                                                               |
+| `resolveApiContext`      | everything, for routes that predate the split                              | remaining Phase 4–9 routes                                                                                                              |
 
 Pairing, refreshing, and listing workspaces therefore work with **no** AssemblyAI, OpenAI, R2,
 Telegram, or automation configuration present. A test asserts the body of `resolveDesktopContext`
@@ -262,18 +263,18 @@ would be unverifiable by construction.
 
 The existing native code stands as written and unverified:
 
-| File | What it claims to do |
-| --- | --- |
+| File                                                | What it claims to do                                        |
+| --------------------------------------------------- | ----------------------------------------------------------- |
 | `apps/desktop/crates/recorder-core/src/manifest.rs` | on-disk session manifest: chunk inventory, checksums, state |
-| `apps/desktop/crates/recorder-core/src/session.rs` | canonical timeline across start / pause / resume / stop |
-| `apps/desktop/crates/recorder-core/src/recovery.rs` | crash-relaunch reconciliation of on-disk chunks |
-| `apps/desktop/crates/capture-macos/**` | AVFoundation / ScreenCaptureKit capture bridge |
-| `apps/desktop/crates/capture-windows/**` | WASAPI capture bridge |
-| `apps/desktop/src-tauri/src/commands.rs` | typed Tauri command surface for the React UI |
-| `apps/desktop/src-tauri/src/state.rs` | process-local recording state |
-| `apps/desktop/src-tauri/src/lib.rs` | Tauri application setup and plugin registration |
+| `apps/desktop/crates/recorder-core/src/session.rs`  | canonical timeline across start / pause / resume / stop     |
+| `apps/desktop/crates/recorder-core/src/recovery.rs` | crash-relaunch reconciliation of on-disk chunks             |
+| `apps/desktop/crates/capture-macos/**`              | AVFoundation / ScreenCaptureKit capture bridge              |
+| `apps/desktop/crates/capture-windows/**`            | WASAPI capture bridge                                       |
+| `apps/desktop/src-tauri/src/commands.rs`            | typed Tauri command surface for the React UI                |
+| `apps/desktop/src-tauri/src/state.rs`               | process-local recording state                               |
+| `apps/desktop/src-tauri/src/lib.rs`                 | Tauri application setup and plugin registration             |
 
-What *has* been checked is structural, by TypeScript tests that read the Rust sources as text:
+What _has_ been checked is structural, by TypeScript tests that read the Rust sources as text:
 `tests/desktop/rust-structure.test.ts` (11 assertions on declarations, naming, and the absence of
 network/SQL dependencies) and `tests/desktop/recorder-offline-boundary.test.ts` (no HTTP client, no
 SQL, no Supabase dependency in the workspace). Those prove what the files say, not that they compile.
@@ -294,10 +295,10 @@ npm run build --workspace @suhbat/desktop      # Vite renderer bundle
 
 The suites that pin this document down:
 
-| Suite | Covers |
-| --- | --- |
+| Suite                                          | Covers                                                                                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `tests/security/three-role-deployment.test.ts` | the three-role split: Web → Recording API trust, authorization re-checks, no providers in the request path, one desktop origin |
-| `tests/security/web-trust-boundary.test.ts` | sections 1, 5 — no privileged credential reachable from `apps/web`; RPC allow-list; capability split |
-| `tests/rls/phase13-desktop-client.test.ts` | sections 2, 3, 4 — rotation, atomic exchange, refresh contention, abuse control, RLS posture |
-| `tests/desktop/cloud-client.test.ts` | the client sends the refresh token only to `/refresh` and never in a URL |
-| `tests/desktop/rust-structure.test.ts` | section 6 — structural checks only |
+| `tests/security/web-trust-boundary.test.ts`    | sections 1, 5 — no privileged credential reachable from `apps/web`; RPC allow-list; capability split                           |
+| `tests/rls/phase13-desktop-client.test.ts`     | sections 2, 3, 4 — rotation, atomic exchange, refresh contention, abuse control, RLS posture                                   |
+| `tests/desktop/cloud-client.test.ts`           | the client sends the refresh token only to `/refresh` and never in a URL                                                       |
+| `tests/desktop/rust-structure.test.ts`         | section 6 — structural checks only                                                                                             |

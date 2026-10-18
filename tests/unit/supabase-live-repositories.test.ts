@@ -116,9 +116,7 @@ class FakeQuery implements PostgrestQuery<Row> {
   }
 
   then<TResult1 = PostgrestRows<Row>, TResult2 = never>(
-    onfulfilled?:
-      | ((value: PostgrestRows<Row>) => TResult1 | PromiseLike<TResult1>)
-      | null,
+    onfulfilled?: ((value: PostgrestRows<Row>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): PromiseLike<TResult1 | TResult2> {
     this.record(false, this.selected);
@@ -151,8 +149,18 @@ class FakeClient {
 function fixtureTables(overrides: Record<string, Row[]> = {}): Record<string, Row[]> {
   return {
     workspaces: [
-      { id: workspaceA, name: 'Workspace A', slug: 'workspace-a', created_at: '2026-10-01T00:00:00.000Z' },
-      { id: workspaceB, name: 'Workspace B', slug: 'workspace-b', created_at: '2026-10-02T00:00:00.000Z' },
+      {
+        id: workspaceA,
+        name: 'Workspace A',
+        slug: 'workspace-a',
+        created_at: '2026-10-01T00:00:00.000Z',
+      },
+      {
+        id: workspaceB,
+        name: 'Workspace B',
+        slug: 'workspace-b',
+        created_at: '2026-10-02T00:00:00.000Z',
+      },
     ],
     // RLS exposes only the caller's own membership rows; the fake mirrors that by storing both users' rows
     // and by the adapter filtering on `user_id` (asserted below).
@@ -200,7 +208,16 @@ function fixtureTables(overrides: Record<string, Row[]> = {}): Record<string, Ro
     projects: [],
     recordings: [],
     meeting_participants: [
-      { id: '99999999-9999-4999-8999-999999999999', meeting_id: meetingA, workspace_id: workspaceA, user_id: userA, display_name: 'Owner A', email: null, is_external: false, sort_order: 0 },
+      {
+        id: '99999999-9999-4999-8999-999999999999',
+        meeting_id: meetingA,
+        workspace_id: workspaceA,
+        user_id: userA,
+        display_name: 'Owner A',
+        email: null,
+        is_external: false,
+        sort_order: 0,
+      },
     ],
     meeting_speakers: [],
     transcript_segments: [],
@@ -306,7 +323,11 @@ describe('live mode resolves to the session-backed Supabase adapter', () => {
     const meetingQueries = client.calls.filter((call) => call.table === 'meetings');
     expect(meetingQueries.length).toBeGreaterThan(0);
     for (const query of meetingQueries) {
-      expect(query.filters).toContainEqual({ kind: 'eq', column: 'workspace_id', value: workspaceA });
+      expect(query.filters).toContainEqual({
+        kind: 'eq',
+        column: 'workspace_id',
+        value: workspaceA,
+      });
     }
   });
 });
@@ -331,7 +352,12 @@ describe('workspace isolation', () => {
     liveContext(
       fixtureTables({
         workspace_members: [
-          { workspace_id: workspaceA, user_id: userA, role: 'owner', membership_status: 'disabled' },
+          {
+            workspace_id: workspaceA,
+            user_id: userA,
+            role: 'owner',
+            membership_status: 'disabled',
+          },
         ],
       }),
     );

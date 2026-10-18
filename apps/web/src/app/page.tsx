@@ -259,7 +259,8 @@ function DemoWorkspaceCard() {
         </Link>
         <span className="text-xs text-slate-500">
           Selected by <code className="rounded bg-slate-100 px-1.5 py-0.5">SUHBAT_DATA_MODE</code>.
-          Live mode reads this workspace through the signed-in Supabase session, under PostgreSQL RLS.
+          Live mode reads this workspace through the signed-in Supabase session, under PostgreSQL
+          RLS.
         </span>
       </div>
     </Card>

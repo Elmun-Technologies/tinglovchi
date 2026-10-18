@@ -147,9 +147,7 @@ function createHttpGateway(options: {
  * authorization re-checks. Only the transport is missing. That is deliberate: the trust mechanism
  * should be exercised on every test run, not only in a deployment.
  */
-async function createInProcessGateway(
-  service: Phase4BackboneService,
-): Promise<RecordingGateway> {
+async function createInProcessGateway(service: Phase4BackboneService): Promise<RecordingGateway> {
   // Imported dynamically and only on the test/injected path. A production web deployment must never
   // need this module — its recording work happens in the Recording API process — and keeping the
   // import lazy means it is never even loaded there.
@@ -217,11 +215,7 @@ export async function resolveRecordingContext(
   }
 
   if (!principal?.userId) {
-    throw new Phase4ServiceError(
-      401,
-      'unauthenticated',
-      'Authenticated user session is required.',
-    );
+    throw new Phase4ServiceError(401, 'unauthenticated', 'Authenticated user session is required.');
   }
 
   const gateway =

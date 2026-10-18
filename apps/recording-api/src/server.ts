@@ -131,7 +131,10 @@ const ROUTES: Route[] = [
       // The client's workspaceId and meetingId are claims, not facts. Prove both before writing.
       await assertActiveWorkspaceMembership(context.db, context.principal.userId, workspaceId);
       await assertMeetingInWorkspace(context.db, context.principal.userId, workspaceId, meetingId);
-      const result = await context.service.createRecording(context.principal, context.body() as never);
+      const result = await context.service.createRecording(
+        context.principal,
+        context.body() as never,
+      );
       return json(result, result.idempotentReused ? 200 : 201);
     },
   },
@@ -367,7 +370,11 @@ export function createRecordingApi(options: RecordingApiOptions): RecordingApi {
               try {
                 parsedBody = JSON.parse(request.body) as unknown;
               } catch {
-                throw new Phase4ServiceError(400, 'validation_failed', 'Malformed JSON request body.');
+                throw new Phase4ServiceError(
+                  400,
+                  'validation_failed',
+                  'Malformed JSON request body.',
+                );
               }
             }
           }
@@ -387,7 +394,12 @@ export function createRecordingApi(options: RecordingApiOptions): RecordingApi {
         };
       }
       if (cause instanceof Phase4ServiceError) {
-        log({ event: 'recording_api.error', code: cause.code, status: cause.statusCode, route: pathname });
+        log({
+          event: 'recording_api.error',
+          code: cause.code,
+          status: cause.statusCode,
+          route: pathname,
+        });
         return {
           status: cause.statusCode,
           headers: { ...JSON_HEADERS, 'cache-control': 'no-store' },
@@ -446,7 +458,9 @@ function notFound(): RecordingApiResponse {
 // ---------------------------------------------------------------------------
 
 /** Builds the service from the environment. Used by `index.ts`; tests inject instead. */
-export async function createRecordingApiFromEnv(env: Record<string, string | undefined> = process.env) {
+export async function createRecordingApiFromEnv(
+  env: Record<string, string | undefined> = process.env,
+) {
   const { getWorkerExecutor } = await import('@suhbat/database/worker-executor');
   const { createStorageProviderFromEnv } = await import('@suhbat/database/storage');
 

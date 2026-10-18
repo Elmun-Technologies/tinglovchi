@@ -86,22 +86,18 @@ export function getPhase4Runtime(): Phase4RuntimeResolver | null {
 // The desktop pairing flow runs entirely on `resolveDesktopContext`, so a missing
 // `ASSEMBLYAI_API_KEY`, `OPENAI_API_KEY`, or R2 bucket cannot stop someone from signing in.
 
-let supabaseClientPromise: Promise<SupabaseClient> | null = null;
-
 /**
- * Resolves lazily and caches the Supabase client.
+ * Builds a Supabase client bound to the current request's cookies.
+ *
+ * Never cache the result: the client carries the caller's browser session, so a process-wide instance
+ * would authenticate every later request as whoever happened to call first.
  *
  * Imported dynamically because `@suhbat/database/server` pulls in `next/headers` and `server-only`,
  * neither of which may be evaluated at module scope in a non-request context (including tests).
  */
 async function supabaseClient(): Promise<SupabaseClient> {
-  if (!supabaseClientPromise) {
-    supabaseClientPromise = (async () => {
-      const { createSupabaseServerClient } = await import('@suhbat/database/server');
-      return (await createSupabaseServerClient()) as unknown as SupabaseClient;
-    })();
-  }
-  return supabaseClientPromise;
+  const { createSupabaseServerClient } = await import('@suhbat/database/server');
+  return (await createSupabaseServerClient()) as unknown as SupabaseClient;
 }
 
 function buildDesktopService(client: SupabaseClient): DesktopClientService {

@@ -59,10 +59,16 @@ export function MeetingProcessingBanner({ processing }: { processing: Processing
 
   if (failed) {
     return (
-      <Notice tone="warning" title="Suhbat saqlandi. Tahlil vaqtincha bajarilmadi." className="xl:col-span-2">
+      <Notice
+        tone="warning"
+        title="Suhbat saqlandi. Tahlil vaqtincha bajarilmadi."
+        className="xl:col-span-2"
+      >
         <p>Audio serverda saqlangan va o‘chirilmaydi. Natija shu sahifada paydo bo‘ladi.</p>
         {processing.error?.message ? <p>{processing.error.message}</p> : null}
-        {headline ? <p className="opacity-80">To‘xtagan bosqich: {processingStepLabel(headline)}.</p> : null}
+        {headline ? (
+          <p className="opacity-80">To‘xtagan bosqich: {processingStepLabel(headline)}.</p>
+        ) : null}
       </Notice>
     );
   }
@@ -70,7 +76,9 @@ export function MeetingProcessingBanner({ processing }: { processing: Processing
   return (
     <Notice tone="info" title={meetingStateLabels[processing.state]} className="xl:col-span-2">
       <p>{note}</p>
-      {headline ? <p className="opacity-80">Hozirgi bosqich: {processingStepLabel(headline)}.</p> : null}
+      {headline ? (
+        <p className="opacity-80">Hozirgi bosqich: {processingStepLabel(headline)}.</p>
+      ) : null}
     </Notice>
   );
 }

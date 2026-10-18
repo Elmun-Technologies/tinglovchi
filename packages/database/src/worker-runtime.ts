@@ -384,10 +384,11 @@ export class MeetingProcessingWorkerRuntime {
       if (this.stopRequested || options.signal?.aborted) {
         break;
       }
-      const now = options.now ? options.now() : new Date();
+      // Without an injected clock each job reads the time itself: one timestamp shared across a batch
+      // goes stale while earlier jobs run, so later claims would get leases that are already expired.
       const batch = await this.drainQueue({
         maxJobs: options.maxJobsPerIteration ?? 25,
-        now,
+        now: options.now?.(),
         reconcileDeletions: options.reconcileDeletions ?? true,
       });
       aggregate.claimedCount += batch.claimedCount;

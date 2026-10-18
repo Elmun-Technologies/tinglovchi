@@ -89,8 +89,8 @@ export default async function DesktopConnectPage({
         <div className="mt-6">
           <Notice tone="success" title="Desktop app connected">
             <p>
-              Approved{params.workspace ? ' for the selected workspace' : ''}. Return to the app — it
-              will pick the session up within a couple of seconds.
+              Approved{params.workspace ? ' for the selected workspace' : ''}. Return to the app —
+              it will pick the session up within a couple of seconds.
             </p>
           </Notice>
         </div>
@@ -100,8 +100,8 @@ export default async function DesktopConnectPage({
         <div className="mt-6">
           <Notice tone="danger" title="That code is not valid">
             <p>
-              Codes are 12 characters in three groups, for example <code>7K4M-9QXB-2T3V</code>. Check
-              the app and try again.
+              Codes are 12 characters in three groups, for example <code>7K4M-9QXB-2T3V</code>.
+              Check the app and try again.
             </p>
           </Notice>
         </div>
@@ -129,7 +129,9 @@ export default async function DesktopConnectPage({
       {signedIn && workspaces.length === 0 ? (
         <div className="mt-6">
           <Notice tone="warning" title="No active workspace">
-            <p>You need an active workspace before the desktop recorder can save meetings into it.</p>
+            <p>
+              You need an active workspace before the desktop recorder can save meetings into it.
+            </p>
           </Notice>
         </div>
       ) : null}
@@ -169,9 +171,9 @@ export default async function DesktopConnectPage({
       ) : null}
 
       <p className="mt-6 text-xs leading-5 text-slate-500">
-        Approving stores only a hash of the code and issues the app its own revocable session. You can
-        revoke any device from workspace settings. SUHBAT never asks for your password inside the
-        desktop app.
+        Approving stores only a hash of the code and issues the app its own revocable session. You
+        can revoke any device from workspace settings. SUHBAT never asks for your password inside
+        the desktop app.
       </p>
     </main>
   );

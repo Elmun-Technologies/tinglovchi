@@ -24,7 +24,9 @@ function connectPath(state: DesktopConnectState, extra: Record<string, string> =
 }
 
 export async function authorizeDesktopConnectAction(formData: FormData): Promise<void> {
-  const rawCode = String(formData.get('code') ?? '').trim().toUpperCase();
+  const rawCode = String(formData.get('code') ?? '')
+    .trim()
+    .toUpperCase();
   const rawWorkspace = String(formData.get('workspaceId') ?? '').trim();
 
   const parsed = desktopConnectCodeSchema.safeParse(rawCode);

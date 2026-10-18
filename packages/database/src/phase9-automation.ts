@@ -1266,6 +1266,31 @@ export class Phase9AutomationWorker {
     const job = await this.claimNextJob(workerId, options);
     if (!job) return null;
 
+    try {
+      return await this.dispatchClaimedJob(workerId, job, options);
+    } catch (cause) {
+      // A handler that throws outside its own provider error handling must not take the worker
+      // process down with it: record a retryable failure so the job backs off instead of sitting in
+      // `running` until its lease expires and then crash-looping every worker that reclaims it.
+      const phase4Worker = this.phase8Worker.phase7Worker.phase6Worker.phase5Worker.phase4Worker;
+      try {
+        return await phase4Worker.failJob(workerId, job.id, job.fencingToken, {
+          code: 'unhandled_worker_error',
+          message: (cause instanceof Error ? cause.message : String(cause)).slice(0, 500),
+          retryable: true,
+        });
+      } catch {
+        // The lease is already gone (or the database is unreachable); the job is no longer ours.
+        return job;
+      }
+    }
+  }
+
+  private async dispatchClaimedJob(
+    workerId: string,
+    job: ProcessingJobDto,
+    options: { now?: Date },
+  ): Promise<ProcessingJobDto> {
     if (job.jobType === 'execute_automation_action') {
       return this.executeClaimedAutomationActionJob(workerId, job, options);
     }

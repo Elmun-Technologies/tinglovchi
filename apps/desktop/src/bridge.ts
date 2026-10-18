@@ -124,8 +124,7 @@ function tryJson(text: string): unknown {
   }
 }
 
-const BASE64_ALPHABET =
-  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 function decodeBase64(encoded: string): Uint8Array {
   const text = encoded.replace(/[\s=]/g, '');
@@ -136,7 +135,11 @@ function decodeBase64(encoded: string): Uint8Array {
   for (const character of text) {
     const value = BASE64_ALPHABET.indexOf(character);
     if (value < 0) {
-      throw new ContractViolationError('chunk bytes', encoded, new Error('invalid base64 character'));
+      throw new ContractViolationError(
+        'chunk bytes',
+        encoded,
+        new Error('invalid base64 character'),
+      );
     }
     bitBuffer = (bitBuffer << 6) | value;
     bitCount += 6;

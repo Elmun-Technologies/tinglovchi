@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { CloudError, cloudBaseUrl, connectApprovalUrl, createCloudClient } from '../../apps/desktop/src/cloud.ts';
+import {
+  CloudError,
+  cloudBaseUrl,
+  connectApprovalUrl,
+  createCloudClient,
+} from '../../apps/desktop/src/cloud.ts';
 
 /**
  * The desktop's single network door.
@@ -53,7 +58,13 @@ const WORKSPACE = {
 
 describe('endpoint routing', () => {
   it('mints a connect code without sending a session token', async () => {
-    const h = harness({ handler: () => json({ code: 'AB12-CDEF-GH34', status: 'pending', expiresAt: 'x', pollIntervalMs: 2000 }, 201) });
+    const h = harness({
+      handler: () =>
+        json(
+          { code: 'AB12-CDEF-GH34', status: 'pending', expiresAt: 'x', pollIntervalMs: 2000 },
+          201,
+        ),
+    });
     const created = await h.client.createConnectCode('SUHBAT desktop');
     expect(created.code).toBe('AB12-CDEF-GH34');
     expect(h.last().url).toBe(`${API}/api/v1/desktop/connect-codes`);
@@ -135,7 +146,16 @@ describe('endpoint routing', () => {
   });
 
   it('authenticates every ordinary call with the bearer token', async () => {
-    const h = harness({ handler: () => json({ userId: '33333333-3333-4333-8333-333333333333', userEmail: null, defaultWorkspaceId: null, workspaces: [], expiresAt: 'x' }) });
+    const h = harness({
+      handler: () =>
+        json({
+          userId: '33333333-3333-4333-8333-333333333333',
+          userEmail: null,
+          defaultWorkspaceId: null,
+          workspaces: [],
+          expiresAt: 'x',
+        }),
+    });
     await h.client.describeSession();
     expect(new Headers(h.last().init.headers).get('authorization')).toBe('Bearer token-abc');
   });
@@ -257,9 +277,20 @@ describe('error classification', () => {
 
   it('surfaces the server’s own message rather than a generic one', async () => {
     const h = harness({
-      handler: () => json({ error: { code: 'validation_failed', message: 'That meeting type does not belong to this workspace.' } }, 400),
+      handler: () =>
+        json(
+          {
+            error: {
+              code: 'validation_failed',
+              message: 'That meeting type does not belong to this workspace.',
+            },
+          },
+          400,
+        ),
     });
-    const error = await h.client.createMeeting({ workspaceId: WORKSPACE.id }).catch((c: unknown) => c);
+    const error = await h.client
+      .createMeeting({ workspaceId: WORKSPACE.id })
+      .catch((c: unknown) => c);
     expect((error as CloudError).message).toContain('meeting type');
   });
 
@@ -380,7 +411,11 @@ describe('configuration', () => {
   });
 
   it('derives the approval URL from the configured origin', () => {
-    expect(connectApprovalUrl('https://app.suhbat.uz')).toBe('https://app.suhbat.uz/desktop/connect');
-    expect(connectApprovalUrl('https://app.suhbat.uz/')).toBe('https://app.suhbat.uz/desktop/connect');
+    expect(connectApprovalUrl('https://app.suhbat.uz')).toBe(
+      'https://app.suhbat.uz/desktop/connect',
+    );
+    expect(connectApprovalUrl('https://app.suhbat.uz/')).toBe(
+      'https://app.suhbat.uz/desktop/connect',
+    );
   });
 });

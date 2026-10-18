@@ -22,11 +22,7 @@ export async function GET(request: NextRequest) {
   try {
     const { desktopService, principal } = await resolveDesktopContext(request);
     if (!principal) {
-      throw new Phase4ServiceError(
-        401,
-        'unauthenticated',
-        'Sign in to list workspaces.',
-      );
+      throw new Phase4ServiceError(401, 'unauthenticated', 'Sign in to list workspaces.');
     }
     // Desktop callers pass the access token; browser callers resolve through their own session.
     const workspaces = await desktopService.listWorkspaces(desktopBearerToken(request));

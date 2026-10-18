@@ -42,7 +42,11 @@ import {
   readBuildEnv,
   type CloudClient,
 } from './cloud.ts';
-import { createLocalChunkSource, createUploadNetworkAdapter, createUploadRunner } from './upload-runner.ts';
+import {
+  createLocalChunkSource,
+  createUploadNetworkAdapter,
+  createUploadRunner,
+} from './upload-runner.ts';
 import { DesktopRecordingUploadQueue } from './upload-queue.ts';
 import { copy, temporaryMeetingTitle } from './copy.ts';
 import { IdleView } from './views/idle-view.tsx';
@@ -80,10 +84,14 @@ export function App() {
   const [captureSystemAudio, setCaptureSystemAudio] = useState(true);
   const [recoveredSessionId, setRecoveredSessionId] = useState<string | null>(null);
 
+  // Kept current by `persistSession`, the only writer of `session`.
   const sessionRef = useRef(session);
-  sessionRef.current = session;
+  const uploadSessionIdRef = useRef<string | null>(null);
 
   const apiBase = useMemo(() => cloudBaseUrl(readBuildEnv()), []);
+  // The client and runner below only dereference refs inside callbacks run from effects and handlers,
+  // never during render; the compiler cannot see that through the factory calls.
+  /* eslint-disable react-hooks/refs, react-hooks/preserve-manual-memoization */
   const cloud: CloudClient | null = useMemo(
     () =>
       apiBase
@@ -108,8 +116,8 @@ export function App() {
     });
     return createUploadRunner({ queue, reader: () => Promise.resolve(new Uint8Array()) });
   }, [bridge, cloud]);
+  /* eslint-enable react-hooks/refs, react-hooks/preserve-manual-memoization */
 
-  const uploadSessionIdRef = useRef<string | null>(null);
   const meetingRef = useRef<MeetingContext | null>(null);
   // Read through a function so TypeScript does not narrow the ref to `null` after an assignment:
   // meeting linkage is set asynchronously and must be re-read after every await.
@@ -142,7 +150,10 @@ export function App() {
       userId: null,
       userEmail: null,
     });
-    dispatch({ type: 'session_expired', notice: { tone: 'warn', title: copy.errors.sessionExpired } });
+    dispatch({
+      type: 'session_expired',
+      notice: { tone: 'warn', title: copy.errors.sessionExpired },
+    });
   }, [persistSession]);
 
   /** Stores a fresh credential pair from the server, keeping the local workspace choice. */
@@ -166,7 +177,9 @@ export function App() {
         userId: credentials.userId,
         userEmail: credentials.userEmail,
         workspaces:
-          credentials.workspaces.length > 0 ? credentials.workspaces : sessionRef.current.workspaces,
+          credentials.workspaces.length > 0
+            ? credentials.workspaces
+            : sessionRef.current.workspaces,
         selectedWorkspaceId:
           credentials.defaultWorkspaceId ?? sessionRef.current.selectedWorkspaceId,
       });
@@ -216,7 +229,10 @@ export function App() {
   const fail = useCallback((error: unknown, fallback: FlowNotice) => {
     const recorderError = toRecorderError(error);
     if (error instanceof BridgeUnavailableError) {
-      dispatch({ type: 'notice', notice: { tone: 'error', title: copy.errors.recorderUnavailable } });
+      dispatch({
+        type: 'notice',
+        notice: { tone: 'error', title: copy.errors.recorderUnavailable },
+      });
       return;
     }
     if (error instanceof CloudError) {
@@ -248,24 +264,38 @@ export function App() {
   useEffect(() => {
     if (bridge.kind === 'unavailable') return;
     void (async () => {
-      await run('permissions', () => bridge.refreshPermissions(), (snapshot) =>
-        send({ type: 'permissions', snapshot }),
+      await run(
+        'permissions',
+        () => bridge.refreshPermissions(),
+        (snapshot) => send({ type: 'permissions', snapshot }),
       );
-      await run('recovery', () => bridge.scanSessions(), (report) => {
-        send({ type: 'recovery', report });
-        const durable = report.sessions.find(
-          (candidate) => candidate.recoverable && candidate.durableChunkCount > 0,
-        );
-        if (durable) setRecoveredSessionId(durable.sessionId);
-      });
-      await run('devices', () => bridge.listDevices('microphone'), (devices) => {
-        send({ type: 'devices', devices });
-        const preferred =
-          devices.find((device) => device.isAvailable && device.isDefault) ??
-          devices.find((device) => device.isAvailable);
-        setDeviceUid(preferred?.uid ?? null);
-      });
-      await run('status', () => bridge.status(), (status) => send({ type: 'status', status }));
+      await run(
+        'recovery',
+        () => bridge.scanSessions(),
+        (report) => {
+          send({ type: 'recovery', report });
+          const durable = report.sessions.find(
+            (candidate) => candidate.recoverable && candidate.durableChunkCount > 0,
+          );
+          if (durable) setRecoveredSessionId(durable.sessionId);
+        },
+      );
+      await run(
+        'devices',
+        () => bridge.listDevices('microphone'),
+        (devices) => {
+          send({ type: 'devices', devices });
+          const preferred =
+            devices.find((device) => device.isAvailable && device.isDefault) ??
+            devices.find((device) => device.isAvailable);
+          setDeviceUid(preferred?.uid ?? null);
+        },
+      );
+      await run(
+        'status',
+        () => bridge.status(),
+        (status) => send({ type: 'status', status }),
+      );
     })();
     // Boot once. Everything after this is driven by polling and user intent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -304,7 +334,10 @@ export function App() {
           userEmail = info.userEmail;
           selectedWorkspaceId = info.defaultWorkspaceId ?? selectedWorkspaceId;
         } catch (cause) {
-          if (cause instanceof CloudError && (cause.code === 'unauthorized' || cause.code === 'not_found')) {
+          if (
+            cause instanceof CloudError &&
+            (cause.code === 'unauthorized' || cause.code === 'not_found')
+          ) {
             // One attempt at renewal, in case the access token expired between the check above and
             // this call. If that fails too, the session really is gone.
             const renewed = await renewCredentials();
@@ -352,12 +385,17 @@ export function App() {
 
   /* ------------------------------------------------------------- polling */
 
-  const capturing = isFlowCapturing(flow) || (panel.status ? isCapturingState(panel.status.state) : false);
+  const capturing =
+    isFlowCapturing(flow) || (panel.status ? isCapturingState(panel.status.state) : false);
   useEffect(() => {
     if (bridge.kind === 'unavailable') return;
     const interval = capturing ? POLL_ACTIVE_MS : POLL_IDLE_MS;
     const timer = window.setInterval(() => {
-      void run('status', () => bridge.status(), (status) => send({ type: 'status', status }));
+      void run(
+        'status',
+        () => bridge.status(),
+        (status) => send({ type: 'status', status }),
+      );
     }, interval);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -372,7 +410,6 @@ export function App() {
       },
       (error) => send({ type: 'error', error }),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, dispatch]);
 
   /* ------------------------------------------------------ upload pumping */
@@ -504,7 +541,8 @@ export function App() {
         });
         dispatch({ type: 'pairing_code', code: null });
       } catch (cause) {
-        if (!cancelled) setPairingError(cause instanceof CloudError ? cause.message : copy.errors.generic);
+        if (!cancelled)
+          setPairingError(cause instanceof CloudError ? cause.message : copy.errors.generic);
       }
     }, 2_000);
     return () => {
@@ -528,7 +566,8 @@ export function App() {
     if (!cloud) return null;
     const existing = currentMeeting();
     if (existing) return existing;
-    const workspaceId = sessionRef.current.selectedWorkspaceId ?? resolveWorkspace(sessionRef.current)?.id ?? null;
+    const workspaceId =
+      sessionRef.current.selectedWorkspaceId ?? resolveWorkspace(sessionRef.current)?.id ?? null;
     if (!workspaceId) return null;
     const startedAt = startedAtRef.current ?? new Date();
     const created = await cloud.createMeeting({
@@ -578,7 +617,15 @@ export function App() {
     } catch (cause) {
       dispatch({ type: 'start_failed', notice: startFailureNotice(cause) });
     }
-  }, [bridge, captureSystemAudio, deviceUid, ensureMeeting, flow, systemAudioSupported, workspace?.id]);
+  }, [
+    bridge,
+    captureSystemAudio,
+    deviceUid,
+    ensureMeeting,
+    flow,
+    systemAudioSupported,
+    workspace?.id,
+  ]);
 
   const stop = useCallback(async () => {
     dispatch({ type: 'stop_requested' });
@@ -735,7 +782,7 @@ export function App() {
       uploadSessionIdRef.current = null;
       fail(cause, { tone: 'warn', title: copy.errors.uploadRetry });
     }
-  }, [bridge, cloud, panel.recovery, recoveredSessionId, uploadRunner, workspace?.id]);
+  }, [bridge, cloud, fail, panel.recovery, recoveredSessionId, uploadRunner, workspace]);
 
   /* --------------------------------------------------------------- render */
 
@@ -765,7 +812,9 @@ export function App() {
             <button className="pill-button primary" onClick={() => void uploadRecovered()}>
               {copy.recovery.upload}
             </button>
-            <button onClick={() => setRecoveredSessionId(null)}>{copy.recovery.discardLater}</button>
+            <button onClick={() => setRecoveredSessionId(null)}>
+              {copy.recovery.discardLater}
+            </button>
           </div>
         </div>
       ) : null}
@@ -828,13 +877,28 @@ export function App() {
           canPause={flow.phase === 'recording'}
           canResume={flow.phase === 'paused'}
           canStop={flow.phase === 'recording' || flow.phase === 'paused'}
-          onPause={() => void run('pause', () => bridge.pause(), (status) => send({ type: 'status', status }))}
-          onResume={() => void run('resume', () => bridge.resume(), (status) => send({ type: 'status', status }))}
+          onPause={() =>
+            void run(
+              'pause',
+              () => bridge.pause(),
+              (status) => send({ type: 'status', status }),
+            )
+          }
+          onResume={() =>
+            void run(
+              'resume',
+              () => bridge.resume(),
+              (status) => send({ type: 'status', status }),
+            )
+          }
           onStop={() => void stop()}
         />
       ) : null}
 
-      {flow.phase === 'stopping' || flow.phase === 'uploading' || flow.phase === 'saved_locally' || flow.phase === 'processing' ? (
+      {flow.phase === 'stopping' ||
+      flow.phase === 'uploading' ||
+      flow.phase === 'saved_locally' ||
+      flow.phase === 'processing' ? (
         <ProcessingView phase={flow.phase} productState={flow.processing?.productState ?? null} />
       ) : null}
 
@@ -930,7 +994,11 @@ function startFailureNotice(cause: unknown): FlowNotice {
   const error = toRecorderError(cause);
   switch (error.code) {
     case 'permission_denied':
-      return { tone: 'error', title: copy.errors.microphoneDenied, detail: copy.errors.microphoneDeniedDetail };
+      return {
+        tone: 'error',
+        title: copy.errors.microphoneDenied,
+        detail: copy.errors.microphoneDeniedDetail,
+      };
     case 'system_audio_unavailable':
       return {
         tone: 'warn',

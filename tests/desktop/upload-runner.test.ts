@@ -35,7 +35,13 @@ describe('offline classification', () => {
   });
 
   it('does not treat a permanent rejection as something to retry', () => {
-    for (const code of ['unauthorized', 'not_found', 'validation_failed', 'conflict', 'contract_violation']) {
+    for (const code of [
+      'unauthorized',
+      'not_found',
+      'validation_failed',
+      'conflict',
+      'contract_violation',
+    ]) {
       expect(isOfflineError(uploadError(code, false))).toBe(false);
     }
   });
@@ -126,7 +132,10 @@ describe('upload resume and duplicate protection', () => {
 
   it('stops on a permanent rejection instead of looping', async () => {
     await expect(
-      drain({ chunks: [{ id: 'c1', bytes: new Uint8Array([1]) }], failures: { 1: uploadError('unauthorized', false) } }),
+      drain({
+        chunks: [{ id: 'c1', bytes: new Uint8Array([1]) }],
+        failures: { 1: uploadError('unauthorized', false) },
+      }),
     ).rejects.toMatchObject({ code: 'unauthorized' });
   });
 });

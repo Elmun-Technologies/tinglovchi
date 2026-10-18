@@ -98,7 +98,10 @@ const FORBIDDEN_IN_CLOUD: Array<[string, RegExp]> = [
   ['provider SDKs', /\b(openai|assemblyai|deepgram|whisper|rev_ai)\b/i],
   ['a concrete remote host', /["'`]https?:\/\/(?!\$|)[A-Za-z0-9.-]+\.[a-z]{2,}/],
   ['any other environment variable', /import\.meta\.env\.(?!VITE_SUHBAT_API_BASE_URL)/],
-  ['credential-shaped identifier', /\b(serviceRole|service_role|apiKey|secretKey|api[_-]?key|bearer[A-Z])\b/i],
+  [
+    'credential-shaped identifier',
+    /\b(serviceRole|service_role|apiKey|secretKey|api[_-]?key|bearer[A-Z])\b/i,
+  ],
 ];
 
 const FORBIDDEN_RUST: Array<[string, RegExp]> = [
@@ -129,9 +132,10 @@ describe('desktop renderer has exactly one network door', () => {
   it('covers the renderer and Rust sources it is supposed to', () => {
     expect(rendererFiles.length).toBeGreaterThanOrEqual(8);
     expect(rustFiles.length).toBeGreaterThanOrEqual(15);
-    expect(existsSync(CLOUD_MODULE), 'src/cloud.ts must exist: it is the only allowed network module').toBe(
-      true,
-    );
+    expect(
+      existsSync(CLOUD_MODULE),
+      'src/cloud.ts must exist: it is the only allowed network module',
+    ).toBe(true);
   });
 
   it('finds no network primitive in any renderer file except cloud.ts', () => {
@@ -168,7 +172,10 @@ describe('desktop renderer has exactly one network door', () => {
       const text = code(readFileSync(file, 'utf8'));
       for (const match of text.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
         const specifier = match[1];
-        const allowed = specifier.startsWith('./') || specifier.startsWith('../') || ALLOWED_IMPORTS.has(specifier);
+        const allowed =
+          specifier.startsWith('./') ||
+          specifier.startsWith('../') ||
+          ALLOWED_IMPORTS.has(specifier);
         expect(allowed, `${relative(ROOT, file)} imports ${specifier}`).toBe(true);
       }
     }
@@ -176,7 +183,14 @@ describe('desktop renderer has exactly one network door', () => {
 
   it('never persists a provider credential in local storage', () => {
     const store = code(readFileSync(join(DESKTOP, 'src', 'session-store.ts'), 'utf8'));
-    for (const forbidden of ['password', 'apiKey', 'serviceRole', 'assemblyai', 'openai', 'secret']) {
+    for (const forbidden of [
+      'password',
+      'apiKey',
+      'serviceRole',
+      'assemblyai',
+      'openai',
+      'secret',
+    ]) {
       expect(store.toLowerCase()).not.toContain(forbidden);
     }
     // The one thing it stores is the opaque session token.
@@ -207,7 +221,9 @@ describe('recorder crates stay offline', () => {
         'rust-s3',
         'keyring',
       ]) {
-        expect(text.includes(forbidden), `${relative(ROOT, file)} depends on ${forbidden}`).toBe(false);
+        expect(text.includes(forbidden), `${relative(ROOT, file)} depends on ${forbidden}`).toBe(
+          false,
+        );
       }
     }
   });
@@ -229,9 +245,10 @@ describe('recorder crates stay offline', () => {
     for (const file of rustFiles) {
       const text = code(readFileSync(file, 'utf8'));
       if (/AVFoundation|ScreenCaptureKit|CoreGraphics|objc|__bridge|capture_macos/.test(text)) {
-        expect(gate.test(text), `${relative(ROOT, file)} uses Apple APIs without a target_os gate`).toBe(
-          true,
-        );
+        expect(
+          gate.test(text),
+          `${relative(ROOT, file)} uses Apple APIs without a target_os gate`,
+        ).toBe(true);
       }
     }
     const buildScript = readFileSync(join(DESKTOP, 'crates', 'capture-macos', 'build.rs'), 'utf8');
@@ -242,13 +259,19 @@ describe('recorder crates stay offline', () => {
     const gate = /(cfg\(target_os\s*=\s*"windows"\)|#\[cfg\(target_os\s*=\s*"windows"\)\])/;
     for (const file of rustFiles) {
       const text = code(readFileSync(file, 'utf8'));
-      if (/QueryPerformanceCounter|QueryPerformanceFrequency|suhbat_win_|capture_windows/.test(text)) {
-        expect(gate.test(text), `${relative(ROOT, file)} uses Windows APIs without a target_os gate`).toBe(
-          true,
-        );
+      if (
+        /QueryPerformanceCounter|QueryPerformanceFrequency|suhbat_win_|capture_windows/.test(text)
+      ) {
+        expect(
+          gate.test(text),
+          `${relative(ROOT, file)} uses Windows APIs without a target_os gate`,
+        ).toBe(true);
       }
     }
-    const buildScript = readFileSync(join(DESKTOP, 'crates', 'capture-windows', 'build.rs'), 'utf8');
+    const buildScript = readFileSync(
+      join(DESKTOP, 'crates', 'capture-windows', 'build.rs'),
+      'utf8',
+    );
     expect(buildScript).toContain('cfg(target_os = "windows")');
   });
 
@@ -298,9 +321,16 @@ describe('recorder crates stay offline', () => {
     }
 
     // Recovery's cleanup is the only place a chunk-shaped file can disappear, and it must be `.partial`.
-    const recovery = code(stripTestModules(readFileSync(join(DESKTOP, 'crates', 'recorder-core', 'src', 'recovery.rs'), 'utf8')));
+    const recovery = code(
+      stripTestModules(
+        readFileSync(join(DESKTOP, 'crates', 'recorder-core', 'src', 'recovery.rs'), 'utf8'),
+      ),
+    );
     const cleanup = /fn remove_empty_partials[\s\S]*?\n}/.exec(recovery)?.[0] ?? '';
-    expect(cleanup, 'remove_empty_partials must exist and be the only chunk-shaped cleanup').toBeTruthy();
+    expect(
+      cleanup,
+      'remove_empty_partials must exist and be the only chunk-shaped cleanup',
+    ).toBeTruthy();
     // It may only ever target a `.wav.partial` shell that is too small to contain a single sample.
     expect(cleanup).toMatch(/\.wav\.partial/);
     expect(cleanup).toMatch(/MIN_CHUNK_BYTES/);
@@ -325,7 +355,7 @@ describe('build configuration stays local', () => {
     };
     expect(config.build.frontendDist).toBe('../dist');
     expect(config.app.security.csp).not.toBeNull();
-    expect(config.app.security.csp).toContain("connect-src");
+    expect(config.app.security.csp).toContain('connect-src');
     // The window is an appliance, not a dashboard: it must not ship as a 1040px-wide grid.
     expect(config.app.windows[0]!.width).toBeLessThanOrEqual(560);
     expect(config.bundle.macOS?.minimumSystemVersion).toBe('13.0');
@@ -348,7 +378,15 @@ describe('build configuration stays local', () => {
       readFileSync(join(DESKTOP, 'src-tauri', 'capabilities', 'default.json'), 'utf8'),
     ) as { permissions: string[] };
     for (const permission of capability.permissions) {
-      for (const forbidden of ['shell', 'fs', 'http', 'opener', 'dialog', 'global-shortcut', 'updater']) {
+      for (const forbidden of [
+        'shell',
+        'fs',
+        'http',
+        'opener',
+        'dialog',
+        'global-shortcut',
+        'updater',
+      ]) {
         expect(permission.includes(forbidden), `capability grants ${permission}`).toBe(false);
       }
     }

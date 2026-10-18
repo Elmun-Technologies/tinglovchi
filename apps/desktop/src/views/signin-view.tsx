@@ -38,7 +38,12 @@ export function SignInView({
           <>
             <h2 className="auth-title">{copy.auth.title}</h2>
             <p className="auth-body">{copy.auth.body}</p>
-            <button type="button" className="pill-button primary" onClick={onRequestCode} disabled={busy}>
+            <button
+              type="button"
+              className="pill-button primary"
+              onClick={onRequestCode}
+              disabled={busy}
+            >
               {busy ? copy.auth.creating : copy.auth.createCode}
             </button>
           </>
@@ -62,7 +67,8 @@ export function SignInView({
             </div>
             {!canOpenBrowser && code ? (
               <p className="auth-fallback">
-                Brauzerni ochib <strong>/desktop/connect</strong> sahifasiga o‘ting va shu kodni kiriting.
+                Brauzerni ochib <strong>/desktop/connect</strong> sahifasiga o‘ting va shu kodni
+                kiriting.
               </p>
             ) : null}
           </>

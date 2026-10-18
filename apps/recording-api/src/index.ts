@@ -30,7 +30,12 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function send(response: ServerResponse, status: number, headers: Record<string, string>, body: string): void {
+function send(
+  response: ServerResponse,
+  status: number,
+  headers: Record<string, string>,
+  body: string,
+): void {
   response.writeHead(status, headers);
   response.end(body);
 }

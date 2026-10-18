@@ -18,7 +18,12 @@ export function CloseGuard({
 }) {
   return (
     <div className="sheet-scrim" role="presentation">
-      <aside className="sheet sheet-confirm" role="dialog" aria-modal="true" aria-label={copy.close.title}>
+      <aside
+        className="sheet sheet-confirm"
+        role="dialog"
+        aria-modal="true"
+        aria-label={copy.close.title}
+      >
         <header className="sheet-head">
           <h2>{copy.close.title}</h2>
         </header>
@@ -29,7 +34,12 @@ export function CloseGuard({
           <button type="button" className="pill-button" onClick={onCancel} disabled={busy}>
             {copy.close.cancel}
           </button>
-          <button type="button" className="pill-button stop" onClick={onStopAndSave} disabled={busy}>
+          <button
+            type="button"
+            className="pill-button stop"
+            onClick={onStopAndSave}
+            disabled={busy}
+          >
             {busy ? copy.recording.stopping : copy.close.stopAndSave}
           </button>
         </footer>

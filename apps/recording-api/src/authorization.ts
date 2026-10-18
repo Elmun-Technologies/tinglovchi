@@ -78,7 +78,11 @@ export async function assertMeetingInWorkspace(
   // they should not learn whether it exists.
   await assertActiveWorkspaceMembership(db, userId, workspaceId);
 
-  const result = await db.query<{ workspace_id: string; deleted_at: string | null; purge_status: string | null }>(
+  const result = await db.query<{
+    workspace_id: string;
+    deleted_at: string | null;
+    purge_status: string | null;
+  }>(
     `select workspace_id, deleted_at, purge_status
        from public.meetings
       where id = $1`,

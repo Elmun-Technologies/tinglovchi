@@ -45,7 +45,12 @@ export function SettingsSheet({
       >
         <header className="sheet-head">
           <h2>{copy.settings.title}</h2>
-          <button type="button" className="ghost-button" onClick={onClose} aria-label={copy.settings.close}>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={onClose}
+            aria-label={copy.settings.close}
+          >
             ×
           </button>
         </header>

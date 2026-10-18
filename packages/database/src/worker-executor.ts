@@ -95,7 +95,9 @@ export async function createWorkerExecutor(
  * `sslmode=disable` is accepted only against localhost — a production URL that turns TLS off is a
  * configuration bug and is refused here rather than silently sending credentials in the clear.
  */
-function sslOptionsFor(connectionString: string): { ssl?: false | { rejectUnauthorized: boolean } } {
+function sslOptionsFor(connectionString: string): {
+  ssl?: false | { rejectUnauthorized: boolean };
+} {
   let url: URL;
   try {
     url = new URL(connectionString);
@@ -143,7 +145,10 @@ function sslOptionsFor(connectionString: string): { ssl?: false | { rejectUnauth
  */
 export type PrivilegedRuntimeRole = 'recording-api' | 'worker';
 
-export const PRIVILEGED_RUNTIME_ROLES: readonly PrivilegedRuntimeRole[] = ['recording-api', 'worker'];
+export const PRIVILEGED_RUNTIME_ROLES: readonly PrivilegedRuntimeRole[] = [
+  'recording-api',
+  'worker',
+];
 
 export type WorkerExecutorRequest = {
   /**

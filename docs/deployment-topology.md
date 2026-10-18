@@ -41,7 +41,7 @@ gateway that forwards recording requests.
 - **No `SUPABASE_SERVICE_ROLE_KEY`.** Same reason, same enforcement.
 - **Does not instantiate a `SqlExecutor`.** There is no code path from `apps/web` to one.
 - All user-facing database access goes through Supabase with the caller's session, so RLS applies.
-- What it *does* need that is new: `SUHBAT_RECORDING_API_URL` and `SUHBAT_INTERNAL_API_SECRET`.
+- What it _does_ need that is new: `SUHBAT_RECORDING_API_URL` and `SUHBAT_INTERNAL_API_SECRET`.
 
 **Files:** `apps/web/**`, plus `apps/web/src/lib/recording-gateway.ts` (the forwarding seam).
 
@@ -54,15 +54,15 @@ gateway that forwards recording requests.
 **What it is:** a small Node HTTP service that owns the minimum set of Phase 4 operations the
 desktop recorder needs.
 
-| Operation | Route |
-| --- | --- |
-| Register a recording | `POST /api/v1/recordings` |
-| Read / delete a recording | `GET` \| `DELETE /api/v1/recordings/:id` |
-| Register a source | `POST /api/v1/recordings/:id/sources` |
-| Register a chunk | `POST /api/v1/recordings/:id/chunks` |
+| Operation                 | Route                                                |
+| ------------------------- | ---------------------------------------------------- |
+| Register a recording      | `POST /api/v1/recordings`                            |
+| Read / delete a recording | `GET` \| `DELETE /api/v1/recordings/:id`             |
+| Register a source         | `POST /api/v1/recordings/:id/sources`                |
+| Register a chunk          | `POST /api/v1/recordings/:id/chunks`                 |
 | Authorize a signed upload | `POST /api/v1/recordings/:id/chunks/:chunkId/upload` |
-| Verify an upload | `POST /api/v1/recordings/:id/chunks/:chunkId/verify` |
-| Finalize | `POST /api/v1/recordings/:id/finalize` |
+| Verify an upload          | `POST /api/v1/recordings/:id/chunks/:chunkId/verify` |
+| Finalize                  | `POST /api/v1/recordings/:id/finalize`               |
 
 **Rules:**
 
@@ -73,7 +73,7 @@ desktop recorder needs.
   workspace id without proving membership against the database first.
 - **Re-checks authorization itself.** See §4.
 - **Does not trust identity headers.** The only identity input is the signed user id.
-- **Does not run AssemblyAI or OpenAI.** Validation *rejects* a `recording-api` environment carrying
+- **Does not run AssemblyAI or OpenAI.** Validation _rejects_ a `recording-api` environment carrying
   `ASSEMBLYAI_API_KEY`, `OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN`, or `AUTOMATION_WEBHOOK_SECRET`.
 - **Does not run the worker loop.** It has no job claim, no queue polling, no processing route.
 
@@ -118,13 +118,13 @@ signature = HMAC-SHA256(secret, canonical)
 
 Sent as headers:
 
-| Header | Value |
-| --- | --- |
-| `x-suhbat-service-signature` | `v1=<64 hex>` |
-| `x-suhbat-service-timestamp` | Unix milliseconds |
-| `x-suhbat-service-nonce` | 16 random bytes, hex |
-| `x-suhbat-service-key-id` | which key was used (default `primary`) |
-| `x-suhbat-user-id` | the user the Web gateway authenticated |
+| Header                       | Value                                  |
+| ---------------------------- | -------------------------------------- |
+| `x-suhbat-service-signature` | `v1=<64 hex>`                          |
+| `x-suhbat-service-timestamp` | Unix milliseconds                      |
+| `x-suhbat-service-nonce`     | 16 random bytes, hex                   |
+| `x-suhbat-service-key-id`    | which key was used (default `primary`) |
+| `x-suhbat-user-id`           | the user the Web gateway authenticated |
 
 ### Why each piece is there
 
@@ -152,7 +152,7 @@ The nonce ledger lives in **PostgreSQL** (`public.internal_service_nonces`, adde
 `supabase/migrations/202610080003_internal_service_nonce.sql`), not in process memory.
 
 A process-local ledger protects exactly one machine. Run two — which is the point of running a
-service — and the same signed request can be aimed at the *other* machine inside the timestamp
+service — and the same signed request can be aimed at the _other_ machine inside the timestamp
 window: the signature is still valid, the timestamp is still fresh, the nonce is unheard of there,
 and the write happens twice. The ledger has to be somewhere every machine can see, and Postgres is
 already that place. Redis would be a second stateful system to secure, observe, and fail over, for
@@ -195,7 +195,7 @@ migration:
 2. revokes `all` from `anon`, `authenticated`, and `service_role` **explicitly** — and never grants
    them back. Revoking rather than merely omitting a grant means a later `alter default privileges`
    or a well-meaning follow-up migration cannot silently reopen this surface. `service_role` is
-   included because, although it is a server credential, it is still a Supabase *client* role;
+   included because, although it is a server credential, it is still a Supabase _client_ role;
 3. grants `execute` to exactly one named private server role, `suhbat_recording_api`, and only if
    that role exists — an escape hatch for operators who would rather not connect as owner.
 
@@ -217,7 +217,7 @@ survives.
 5. a duplicate nonce means the request was already used → `401`
 6. only now route and execute the recording operation
 
-Step 4 coming *after* step 3 is what makes this safe. Claiming the nonce first would let any caller
+Step 4 coming _after_ step 3 is what makes this safe. Claiming the nonce first would let any caller
 who can reach the service pre-burn nonces: send one unsigned request bearing nonce `X`, and the
 legitimate request the gateway later signs with `X` is rejected as a replay — a denial of service
 requiring no secret at all. So the ledger only ever records a nonce that arrived attached to a
@@ -237,7 +237,7 @@ one; an outage becomes 401s rather than silent duplicate writes.
    or not the route exists, so it cannot enumerate the API.
 2. Treats the signed user id as the only identity input.
 3. Re-derives authorization from the database:
-   - `createRecording` — the client's `workspaceId` and `meetingId` are *claims*. Confirm active
+   - `createRecording` — the client's `workspaceId` and `meetingId` are _claims_. Confirm active
      membership in the workspace, and that the meeting lives in it, before writing anything.
    - Recording-scoped operations — load the recording row, take the workspace **from the row**, and
      confirm membership against that. A `workspaceId` from the client is used only to produce a
@@ -283,11 +283,11 @@ inside that network. The Recording API uses that, and is not exposed to the inte
 
 ### Service discovery
 
-| App | DNS | Reachable from |
-| --- | --- | --- |
-| `suhbat-web-stg` | `suhbat-web-stg.fly.dev` | internet |
+| App                        | DNS                                                                                 | Reachable from    |
+| -------------------------- | ----------------------------------------------------------------------------------- | ----------------- |
+| `suhbat-web-stg`           | `suhbat-web-stg.fly.dev`                                                            | internet          |
 | `suhbat-recording-api-stg` | `suhbat-recording-api-stg.flycast` (private) or `suhbat-recording-api-stg.internal` | org-internal only |
-| `suhbat-worker-stg` | `suhbat-worker-stg.internal` | org-internal only |
+| `suhbat-worker-stg`        | `suhbat-worker-stg.internal`                                                        | org-internal only |
 
 Two options, with a recommendation:
 
@@ -318,19 +318,19 @@ the internet.
 
 ### Staging
 
-| App | Role | Public? | Notes |
-| --- | --- | --- | --- |
-| `suhbat-web-stg` | `web` | yes | Next.js. Public URL `https://suhbat-web-stg.fly.dev` |
-| `suhbat-recording-api-stg` | `recording-api` | **no** | Private Flycast only |
-| `suhbat-worker-stg` | `worker` | **no** | No services block |
+| App                        | Role            | Public? | Notes                                                |
+| -------------------------- | --------------- | ------- | ---------------------------------------------------- |
+| `suhbat-web-stg`           | `web`           | yes     | Next.js. Public URL `https://suhbat-web-stg.fly.dev` |
+| `suhbat-recording-api-stg` | `recording-api` | **no**  | Private Flycast only                                 |
+| `suhbat-worker-stg`        | `worker`        | **no**  | No services block                                    |
 
 ### Production
 
-| App | Role | Public? | Notes |
-| --- | --- | --- | --- |
-| `suhbat-web` | `web` | yes | `https://app.suhbat.uz` |
-| `suhbat-recording-api` | `recording-api` | **no** | Private Flycast only |
-| `suhbat-worker` | `worker` | **no** | No services block |
+| App                    | Role            | Public? | Notes                   |
+| ---------------------- | --------------- | ------- | ----------------------- |
+| `suhbat-web`           | `web`           | yes     | `https://app.suhbat.uz` |
+| `suhbat-recording-api` | `recording-api` | **no**  | Private Flycast only    |
+| `suhbat-worker`        | `worker`        | **no**  | No services block       |
 
 Plus, shared across both environments:
 
