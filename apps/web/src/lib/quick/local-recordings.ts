@@ -18,7 +18,7 @@ export type LocalRecordingMeta = {
   recordedMs: number;
   chunkCount: number;
   language?: 'uz' | 'ru' | 'en';
-  captureMode?: 'mic' | 'mic_and_system';
+  captureMode?: 'mic' | 'mic_and_system' | 'file';
   /** Set once a chunked upload has started, so a retry resumes it instead of starting over. */
   uploadId?: string | null;
 };

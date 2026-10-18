@@ -1,4 +1,4 @@
-import type { Analysis } from '../../../lib/quick/types';
+import type { Analysis } from './types';
 
 const COLORS = [
   '#0f766e',

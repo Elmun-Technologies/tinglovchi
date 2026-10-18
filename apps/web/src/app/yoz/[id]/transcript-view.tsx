@@ -1,6 +1,6 @@
 import { formatTimestamp } from '../../../lib/quick/format';
 import type { Analysis, Transcript } from '../../../lib/quick/types';
-import { speakerColor, speakerName } from './speakers';
+import { speakerColor, speakerName } from '../../../lib/quick/speakers';
 
 export function TranscriptView({
   transcript,

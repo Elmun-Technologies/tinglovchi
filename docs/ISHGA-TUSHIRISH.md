@@ -93,19 +93,26 @@ docker compose up -d --build     # birinchi marta ~5–10 daqiqa
 Yangilash: `cd tinglovchi && git pull && cd deploy/simple && docker compose up -d --build`.
 Zaxira nusxa: `deploy/simple/backup.sh` (cron’ga har kecha qo‘yish mumkin — fayl ichida yozilgan).
 
-**B. Eng oddiy — Fly.io (~$5–8/oy)**
+**B. Eng tez — Fly.io, GitHub’dan bitta tugma (~$5–8/oy)**
 
-Loyihada `fly.toml` tayyor (`tinglovchi-staging-web`):
+Kalitlarni chatga yoki boshqa joyga yozmang — faqat GitHub’ning maxfiy sozlamalariga qo‘ying:
 
-```bash
-fly volumes create suhbat_data --region fra --size 10 -a tinglovchi-staging-web
-fly secrets set -a tinglovchi-staging-web \
-  ANTHROPIC_API_KEY=sk-ant-... ASSEMBLYAI_API_KEY=... SUHBAT_ACCESS_CODE=jamoa-kodi
-fly deploy
-```
+1. fly.io → Sign up (karta kerak) → Account → **Access Tokens** → token yarating.
+2. GitHub → repo → **Settings → Secrets and variables → Actions → New repository secret**. Quyidagilarni
+   qo‘shing:
 
-Yoki GitHub → Actions → **Fly Deploy** → Run workflow (repo secret’ida `FLY_API_TOKEN` bo‘lsin).
-Manzil: `https://tinglovchi-staging-web.fly.dev/yoz`.
+   | Nomi                    | Qiymati                            | Majburiy  |
+   | ----------------------- | ---------------------------------- | --------- |
+   | `FLY_API_TOKEN`         | fly.io token                       | ha        |
+   | `ANTHROPIC_API_KEY`     | Anthropic kaliti                   | ha        |
+   | `ASSEMBLYAI_API_KEY`    | AssemblyAI kaliti                  | ha        |
+   | `SUHBAT_ACCESS_CODE`    | jamoa paroli                       | ha        |
+   | `TELEGRAM_BOT_TOKEN`    | @BotFather bergan token            | ixtiyoriy |
+   | `TELEGRAM_TEAM_CHAT_ID` | natijalar tushadigan guruh ID’si   | ixtiyoriy |
+   | `FLY_ORG`               | Fly tashkiloti (odatda kerak emas) | ixtiyoriy |
+
+3. GitHub → **Actions → Fly Deploy → Run workflow**. Ilova, disk, kalitlar, deploy va Telegram bot ulanishi
+   o‘zi bajariladi (~5–10 daqiqa). Oxirida manzil chiqadi: `https://tinglovchi-staging-web.fly.dev/yoz`.
 
 **C. O‘zbekistondagi hosting** — shaxsiy ma’lumotlar talabi bo‘yicha (pastda) kerak bo‘lsa: istalgan Ubuntu
 VPS’da A variantidagi 5-qadamni bajaring.
@@ -125,6 +132,27 @@ VPS’da A variantidagi 5-qadamni bajaring.
 - Ovoz AssemblyAI (AQSh) va Anthropic (AQSh) serverlarida qayta ishlanadi. 2026-yil martdagi o‘zgarishdan keyin
   O‘zbekistonda majburiy lokalizatsiya asosan biometrik ma’lumotlarga tegishli; ovoz yozuvi qaysi toifaga
   kirishini advokat bilan tasdiqlang.
+
+## Telegram bot
+
+Bot — eng oddiy yo‘l: telefonda alohida ilova yoki sayt kerak emas.
+
+1. Telegram’da **@BotFather** → `/newbot` → nom bering → token oling (bepul).
+2. Tokenni `TELEGRAM_BOT_TOKEN` sifatida qo‘ying (Fly: GitHub secret; o‘z serveringiz: `deploy/simple/.env`, keyin
+   `./telegram-webhook.sh`).
+3. Botni oching → `/start` → jamoa kirish kodini yuboring. Shundan keyin:
+   - **ovozli xabar** yozing yoki
+   - telefonning **Diktofon** ilovasidagi yozuvni (m4a, mp3, ogg…) yoki **videoni** yuboring.
+4. Bir necha daqiqada bot qaytaradi: xulosa, qarorlar, vazifalar, **mind map**, to‘liq natijaga havola va
+   **PowerPoint prezentatsiya** (fayl).
+
+- Tahlil tili: `/til uz`, `/til ru`, `/til en`.
+- Telegram botlarga **20 MB** gacha fayl beradi (oddiy ovozli xabar — 2–3 soatgacha; diktofon m4a — ~1 soat).
+  Kattaroq yozuvni saytdagi «tayyor yozuvni yuklang» tugmasi orqali yuboring — u yerda cheklov 300 MB.
+- **Uzun suhbatlar uchun eng ishonchli usul:** telefonning o‘z Diktofon ilovasida yozing — ekran qulflansa ham,
+  soatlab yozadi. Keyin faylni botga yoki saytga yuboring.
+- `TELEGRAM_TEAM_CHAT_ID` qo‘yilsa, saytda yozilgan suhbatlar natijasi ham shu guruhga tushadi (botni guruhga
+  qo‘shing; guruh ID’sini bilish uchun guruhga @RawDataBot ni qo‘shib, chiqqan `chat.id` ni oling).
 
 ## Kompyuterda sinab ko‘rish (dasturchilar uchun)
 
@@ -151,10 +179,8 @@ So‘ng http://localhost:3000/yoz ni oching.
 
 1. Har xodimga alohida login va «kim yozgan» (Supabase Auth loyihada bor).
 2. Mijoz kartasi — bitta mijoz bilan barcha suhbatlar va to‘ldirilib boradigan brif.
-3. Tayyor bo‘lganda Telegram’ga avtomatik xulosa.
-4. Oldin yozilgan audio/video faylni yuklab tahlil qilish.
-5. Mobil ilova — ekran qulflangan holda ham yozish.
-6. Lug‘at — brend va mahsulot nomlarini transkripsiyaga oldindan berish.
+3. Mobil ilova — ekran qulflangan holda ham yozish.
+4. Lug‘at — brend va mahsulot nomlarini transkripsiyaga oldindan berish.
 
 ## Kod qayerda
 
@@ -167,5 +193,6 @@ So‘ng http://localhost:3000/yoz ni oching.
 | `apps/web/src/lib/quick/analyze.ts`       | Claude tahlili, prompt, tannarx hisobi                              |
 | `apps/web/src/lib/quick/pipeline.ts`      | Transkripsiya → tahlil bosqichlari, qayta urinish                   |
 | `apps/web/src/lib/quick/store.ts`         | Diskda saqlash, bo‘laklarni yig‘ish                                 |
+| `apps/web/src/lib/quick/telegram.ts`      | Telegram bot: qabul qilish, natija va .pptx yuborish                |
 | `deploy/simple/`                          | Bepul/arzon serverga o‘rnatish (Docker + avtomatik HTTPS), zaxira   |
 | `tests/unit/quick-flow.test.ts`           | Testlar                                                             |

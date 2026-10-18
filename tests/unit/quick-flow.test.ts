@@ -83,7 +83,7 @@ describe('one-button flow pipeline', () => {
 
   it('rejects an unknown audio type and an invalid id', async () => {
     await expect(
-      createSession({ audio, mimeType: 'video/quicktime', recordedMs: 0, title: null }),
+      createSession({ audio, mimeType: 'application/pdf', recordedMs: 0, title: null }),
     ).rejects.toThrow(/Unsupported audio type/);
     expect(await readSession('../../etc/passwd')).toBeNull();
   });

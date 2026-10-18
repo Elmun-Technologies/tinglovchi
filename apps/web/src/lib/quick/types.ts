@@ -131,7 +131,10 @@ export type SpeakerStat = z.infer<typeof speakerStatSchema>;
 export const analysisLanguageSchema = z.enum(['uz', 'ru', 'en']);
 export type AnalysisLanguage = z.infer<typeof analysisLanguageSchema>;
 
-export const captureModeSchema = z.enum(['mic', 'mic_and_system']);
+export const sessionSourceSchema = z.enum(['web', 'telegram']);
+export type SessionSource = z.infer<typeof sessionSourceSchema>;
+
+export const captureModeSchema = z.enum(['mic', 'mic_and_system', 'file']);
 export type CaptureMode = z.infer<typeof captureModeSchema>;
 
 /** What a session cost to process, for pricing decisions; estimated from the providers' list prices. */
@@ -158,6 +161,9 @@ export const sessionSchema = z.object({
   recordedMs: z.number().nonnegative(),
   language: analysisLanguageSchema.default('uz'),
   captureMode: captureModeSchema.default('mic'),
+  source: sessionSourceSchema.default('web'),
+  /** The Telegram chat that sent the recording; the result is delivered back there. */
+  telegramChatId: z.number().int().nullable().default(null),
   /** The transcription provider's job id, kept so a retry polls it instead of paying again. */
   providerJobId: z.string().nullable().default(null),
   transcript: transcriptSchema.nullable(),

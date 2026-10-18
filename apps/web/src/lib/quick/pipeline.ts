@@ -65,6 +65,17 @@ export async function retrySession(id: string): Promise<Session | null> {
 }
 
 async function run(id: string): Promise<void> {
+  await advance(id);
+  // Only a run that did work reports its outcome, so reopening a finished session never re-sends it.
+  const finished = await readSession(id);
+  if (finished && !isUnfinished(finished)) {
+    // Imported lazily: the Telegram module itself starts processing for sessions it receives.
+    const { notifySessionFinished } = await import('./telegram');
+    await notifySessionFinished(finished);
+  }
+}
+
+async function advance(id: string): Promise<void> {
   for (;;) {
     const session = await readSession(id);
     if (!session || !isUnfinished(session)) return;
@@ -105,8 +116,10 @@ async function step(session: Session): Promise<void> {
     if (transcript.durationMs === 0) transcript.durationMs = session.recordedMs;
     const audioSeconds = transcript.durationMs / 1000;
     const perHour = transcriptionCostPerHourUsd(transcript.provider);
-    await updateSession(session.id, () => ({
+    await updateSession(session.id, (current) => ({
       transcript,
+      // An uploaded file's length is only known once it has been transcribed.
+      recordedMs: current.recordedMs || transcript.durationMs,
       usage: {
         audioSeconds,
         transcriptionProvider: transcript.provider,

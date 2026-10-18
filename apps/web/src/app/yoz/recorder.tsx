@@ -38,6 +38,28 @@ const LANGUAGES: Array<{ value: Language; label: string }> = [
   { value: 'en', label: 'English' },
 ];
 
+// Some systems hand over a file with no type (often .m4a on Windows); the name tells it instead.
+const EXTENSION_TYPES: Record<string, string> = {
+  m4a: 'audio/mp4',
+  mp3: 'audio/mpeg',
+  ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  opus: 'audio/opus',
+  wav: 'audio/wav',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  amr: 'audio/amr',
+  '3gp': 'audio/3gpp',
+  webm: 'audio/webm',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+};
+
+function fileType(file: File): string {
+  if (file.type) return file.type;
+  return EXTENSION_TYPES[file.name.split('.').pop()?.toLowerCase() ?? ''] ?? '';
+}
+
 function pickMimeType(): string {
   const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? '';
@@ -120,6 +142,7 @@ export function Recorder({ warnings }: { warnings: string[] }) {
   const effectiveMode: CaptureMode = canCaptureSystemAudio ? captureMode : 'mic';
 
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamsRef = useRef<MediaStream[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const clockRef = useRef<{ runningSince: number | null; accumulated: number }>({
@@ -207,6 +230,8 @@ export function Recorder({ warnings }: { warnings: string[] }) {
           onProgress: setProgress,
           onUploadId: async (uploadId) => {
             recording.uploadId = uploadId;
+            // A picked file is not kept on the device by us; there is nothing to resume from.
+            if (recording.captureMode === 'file') return;
             await saveLocalRecordingMeta({
               id: recording.id,
               startedAt: recording.startedAt,
@@ -228,6 +253,28 @@ export function Recorder({ warnings }: { warnings: string[] }) {
       }
     },
     [router, refreshPending],
+  );
+
+  /** Sends an existing recording — a phone dictaphone file, a Telegram voice note, a video. */
+  const uploadFile = useCallback(
+    async (file: File) => {
+      const type = fileType(file);
+      if (!type) {
+        setError('Bu fayl turini tanib bo‘lmadi. Audio yoki video fayl tanlang.');
+        return;
+      }
+      await send({
+        id: crypto.randomUUID(),
+        startedAt: new Date(file.lastModified || Date.now()).toISOString(),
+        mimeType: type,
+        recordedMs: 0,
+        language,
+        captureMode: 'file',
+        uploadId: null,
+        chunks: [file],
+      });
+    },
+    [language, send],
   );
 
   /** Asks for the call's sound through the browser's share dialog; null if the user declined. */
@@ -555,6 +602,29 @@ export function Recorder({ warnings }: { warnings: string[] }) {
               ? `Yuborilmoqda… ${Math.round(progress * 100)}%`
               : 'Suhbat boshlanishidan oldin bir marta bosing'}
       </p>
+
+      {phase === 'idle' ? (
+        <>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-teal-800 hover:underline"
+          >
+            <UploadCloud className="h-4 w-4" /> yoki tayyor yozuvni yuklang (diktofon, video)
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*,video/*,.m4a,.amr,.opus"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) void uploadFile(file);
+            }}
+          />
+        </>
+      ) : null}
 
       {active ? (
         <button

@@ -14,7 +14,8 @@ import {
 import { formatDateTime, formatDuration, formatUsd, totalCostUsd } from '../../../lib/quick/format';
 import type { Session } from '../../../lib/quick/types';
 import { MindMap } from './mind-map';
-import { Overview, summaryAsText } from './overview';
+import { summaryAsText } from '../../../lib/quick/summary-text';
+import { Overview } from './overview';
 import { Roadmap } from './roadmap';
 import { Slides } from './slides';
 import { TranscriptView } from './transcript-view';

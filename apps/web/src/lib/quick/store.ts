@@ -16,6 +16,7 @@ import {
   type AnalysisLanguage,
   type CaptureMode,
   type Session,
+  type SessionSource,
   type SessionSummary,
 } from './types';
 
@@ -45,14 +46,30 @@ function sessionDir(id: string): string {
   return join(sessionsDir(), id);
 }
 
+// Browser recordings, phone dictaphone apps (m4a, amr, 3gp), Telegram voice (ogg/opus) and video files,
+// whose sound the transcription providers extract themselves.
 const AUDIO_EXTENSIONS: Record<string, string> = {
   'audio/webm': 'webm',
   'audio/ogg': 'ogg',
+  'audio/opus': 'opus',
   'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/m4a': 'm4a',
+  'audio/mp4a-latm': 'm4a',
   'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
   'audio/wav': 'wav',
+  'audio/wave': 'wav',
   'audio/x-wav': 'wav',
   'audio/aac': 'aac',
+  'audio/flac': 'flac',
+  'audio/x-flac': 'flac',
+  'audio/amr': 'amr',
+  'audio/3gpp': '3gp',
+  'video/3gpp': '3gp',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
 };
 
 export function audioExtension(mimeType: string): string | null {
@@ -85,6 +102,8 @@ export type NewSessionFields = {
   title: string | null;
   language?: AnalysisLanguage;
   captureMode?: CaptureMode;
+  source?: SessionSource;
+  telegramChatId?: number | null;
 };
 
 async function writeNewSession(
@@ -106,6 +125,8 @@ async function writeNewSession(
     recordedMs: fields.recordedMs,
     language: fields.language ?? 'uz',
     captureMode: fields.captureMode ?? 'mic',
+    source: fields.source ?? 'web',
+    telegramChatId: fields.telegramChatId ?? null,
     providerJobId: null,
     transcript: null,
     speakerStats: [],
