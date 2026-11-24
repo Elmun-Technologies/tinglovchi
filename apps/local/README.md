@@ -31,6 +31,14 @@ Qo‘shimcha: to‘liq **transkript** (vaqt belgilari bilan) va Telegram/pochtag
 
 Namuna prezentatsiyani dastur ichida ko‘rish mumkin: **Suhbatlar → Namuna prezentatsiya**.
 
+> Sizdan kerak bo‘lgan narsalar (kalitlar, balans, birinchi sinov) — **[ULASH.md](ULASH.md)** da.
+
+## Suhbat paytida boshqa oyna/brauzerga o‘tsangiz
+
+Yozuv to‘xtamaydi. Brauzer sahifasi orqa fonda ham mikrofonni yozishda davom etadi va audio har 5 soniyada
+diskka saqlanadi. Faqat quyidagilarni qilmang: sahifa (tab) yoki qora oynani yopmang, kompyuterni uyquga
+yubormang, mikrofonni boshqa dasturga **eksklyuziv** rejimda bermang (Zoom’ni oddiy ishlatish muammo emas).
+
 ## Ishga tushirish
 
 1. [Node.js](https://nodejs.org) (LTS) o‘rnatilgan bo‘lishi kerak — bir marta.
@@ -108,7 +116,7 @@ Suhbat-AI/
 ## Texnik ma’lumot
 
 - `server.mjs` — Node.js’ning o‘zidagi HTTP server (framework yo‘q). Bitta tashqi kutubxona: `@anthropic-ai/sdk`.
-- `public/` — sahifa: `MediaRecorder` (Opus, 48 kbit/s ≈ 20 MB/soat), bo‘laklarni ketma-ket yuklash navbati.
+- `public/` — sahifa (dizayn: Outfit shrifti — `public/fonts/`, SIL OFL litsenziyasi): `MediaRecorder` (Opus, 48 kbit/s ≈ 20 MB/soat), bo‘laklarni ketma-ket yuklash navbati.
 - `lib/stt.mjs` — ElevenLabs Scribe (spikerlarni ajratish bilan). `lib/analyze.mjs` — Claude (`claude-opus-5-5`,
   tuzilgan JSON javob; 10+ soatlik suhbatlar uchun qismlab o‘qish). `lib/presentation.mjs` — slaydlar, mind map (SVG).
 - Sinov rejimi (kalitlarsiz, namuna ma’lumot bilan): `SUHBAT_DEMO=1 npm start`.

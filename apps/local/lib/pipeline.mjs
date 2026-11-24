@@ -117,6 +117,10 @@ export function processMeeting(meetingId) {
 
 export const isProcessing = (meetingId) => running.has(meetingId);
 
+/** Qayta ishlash tugaguncha kutadi (ishlamayotgan bo'lsa — darrov qaytadi). */
+export const whenIdle = (meetingId) =>
+  (running.get(meetingId) || Promise.resolve()).catch(() => {});
+
 async function setStage(meeting, stage, extra = {}) {
   Object.assign(meeting, { stage, ...extra });
   await saveMeeting(meeting);

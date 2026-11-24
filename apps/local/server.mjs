@@ -34,7 +34,7 @@ const {
   meetingFile,
   isValidMeetingId,
 } = await import('./lib/store.mjs');
-const { processMeeting, transcribeSegment, isProcessing, DEMO } =
+const { processMeeting, transcribeSegment, isProcessing, whenIdle, DEMO } =
   await import('./lib/pipeline.mjs');
 const { renderPresentation } = await import('./lib/presentation.mjs');
 const { checkElevenlabs } = await import('./lib/stt.mjs');
@@ -52,6 +52,7 @@ const STATIC_TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
   '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
@@ -301,7 +302,9 @@ async function api(req, res, url) {
     const action = parts[3];
     if (!action && m === 'GET') return send(res, 200, { meeting: publicMeeting(meeting) });
     if (!action && m === 'DELETE') {
-      if (isProcessing(meeting.id)) throw new HttpError(409, 'Suhbat hozir qayta ishlanmoqda');
+      if (meeting.status === 'processing')
+        throw new HttpError(409, 'Suhbat hozir qayta ishlanmoqda');
+      await whenIdle(meeting.id); // holat «xato», lekin yozuv hali tugamagan bo'lishi mumkin
       await deleteMeeting(meeting.id);
       return send(res, 200, { ok: true });
     }

@@ -89,21 +89,22 @@ test('prezentatsiya: asosiy bo‘limlar bor, uzun ro‘yxatlar sahifalarga bo‘
   const slides = buildSlides(big, meeting);
   const html = slides.join('\n');
   for (const heading of [
-    'Suhbatdan nima anglashildi',
+    'Suhbatdan nima<br>anglashildi',
     'Suhbat xaritasi',
     'Kim tarafdan qanday talablar',
+    'Mijoz talablari',
     'Kim nimani yuborishi kerak',
     'Kim nimani ko‘rib berishi kerak',
-    'Vazifalar — muhimlik bo‘yicha (1/5)',
+    'Vazifalar ro‘yxati — 1/4',
     'Kim nima qiladi',
-    'Yo‘l xaritasi',
-    'Endi nima qilamiz',
+    'class="road-card"',
+    'ENDI<br>NIMA',
   ]) {
     assert.ok(html.includes(heading), heading);
   }
   assert.ok(html.includes('Vazifa 23'));
   // P1 vazifalar birinchi turadi
-  assert.ok(html.indexOf('pri-border-P1') < html.indexOf('pri-border-P3'));
+  assert.ok(html.indexOf('pri-P1') < html.indexOf('pri-P3'));
   assert.ok(mindMapSvg(big).startsWith('<svg'));
 });
 
