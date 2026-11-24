@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SUHBAT</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230B1B3F'/%3E%3Ccircle cx='32' cy='32' r='14' fill='%23E5484D'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">SUHBAT</div>
+      <div class="top-actions">
+        <button id="btn-history" class="ghost" type="button">
+          Suhbatlar <span id="history-count"></span>
+        </button>
+        <button id="btn-settings" class="ghost" type="button" aria-label="Sozlamalar">
+          ⚙ Sozlamalar
+        </button>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <main id="stage">
+      <!-- 1. Kutish holati: faqat Start -->
+      <section id="view-idle" class="view">
+        <button id="btn-start" class="big-btn start" type="button">
+          <span class="big-label">START</span>
+        </button>
+        <p class="hint">
+          Suhbatdoshlardan ruxsat oling, so‘ng bosing.<br />Suhbat tugagach tahlil prezentatsiya
+          ko‘rinishida chiqadi.
+        </p>
+      </section>
+
+      <!-- 2. Yozib olinmoqda -->
+      <section id="view-rec" class="view" hidden>
+        <div class="rec-status">
+          <span class="dot"></span><span id="rec-label">Yozib olinmoqda</span>
+        </div>
+        <div id="timer" class="timer">00:00:00</div>
+        <div class="meter" aria-hidden="true"><div id="meter-bar"></div></div>
+        <button id="btn-stop" class="big-btn stop" type="button">
+          <span class="big-label">STOP</span>
+        </button>
+        <div class="rec-actions">
+          <button id="btn-pause" class="ghost" type="button">⏸ Pauza</button>
+        </div>
+        <p id="rec-note" class="hint">
+          Audio har 5 soniyada kompyuterga saqlanmoqda. Noutbuk qopqog‘ini yopmang.
+        </p>
+      </section>
+
+      <!-- 3. Qayta ishlanmoqda -->
+      <section id="view-proc" class="view" hidden>
+        <div class="spinner" aria-hidden="true"></div>
+        <h2>Suhbat tahlil qilinmoqda</h2>
+        <p id="proc-stage" class="stage-text">…</p>
+        <p class="hint">
+          Uzun suhbat uchun bu bir necha daqiqa olishi mumkin.<br />Bu sahifani yopsangiz ham
+          jarayon davom etadi.
+        </p>
+      </section>
+
+      <!-- 4. Tayyor -->
+      <section id="view-ready" class="view" hidden>
+        <div class="check" aria-hidden="true">✓</div>
+        <h2 id="ready-title">Tahlil tayyor</h2>
+        <p id="ready-meta" class="hint"></p>
+        <a id="btn-open" class="primary" href="#" target="_blank" rel="noopener"
+          >Prezentatsiyani ochish</a
+        >
+        <div class="links">
+          <a id="lnk-md" href="#" target="_blank" rel="noopener">Matn xulosa</a>
+          <a id="lnk-tr" href="#" target="_blank" rel="noopener">Transkript</a>
+        </div>
+        <button id="btn-new" class="ghost" type="button">Yangi suhbat</button>
+      </section>
+
+      <!-- 5. Xato / uzilgan -->
+      <section id="view-fail" class="view" hidden>
+        <div class="warn" aria-hidden="true">!</div>
+        <h2 id="fail-title">Tahlil tugallanmadi</h2>
+        <p id="fail-text" class="stage-text"></p>
+        <p class="hint">Yozilgan audio kompyuteringizda saqlangan — hech narsa yo‘qolmadi.</p>
+        <button id="btn-retry" class="primary" type="button">Qayta urinish</button>
+        <button id="btn-new2" class="ghost" type="button">Bosh sahifa</button>
+      </section>
+    </main>
+
+    <!-- Suhbatlar ro'yxati -->
+    <aside id="history" class="drawer" hidden>
+      <div class="drawer-head">
+        <h3>Suhbatlar</h3>
+        <button class="ghost close" data-close="history" type="button" aria-label="Yopish">
+          ✕
+        </button>
+      </div>
+      <div id="history-list" class="history-list"></div>
+      <div class="drawer-foot">
+        <label class="ghost upload">
+          Tayyor audio faylni tahlil qilish
+          <input id="file-input" type="file" accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg" hidden />
+        </label>
+        <a class="ghost" href="/namuna" target="_blank" rel="noopener">Namuna prezentatsiya</a>
+      </div>
+    </aside>
+
+    <!-- Sozlamalar -->
+    <dialog id="settings">
+      <form id="settings-form" method="dialog">
+        <h3>Sozlamalar</h3>
+        <p class="hint left">Kalitlar faqat shu kompyuterda saqlanadi. Bir marta kiritiladi.</p>
+        <label
+          >ElevenLabs API kaliti <small>— nutqni matnga aylantirish</small>
+          <input name="elevenlabsApiKey" type="password" autocomplete="off" spellcheck="false" />
+        </label>
+        <label
+          >Anthropic (Claude) API kaliti <small>— tahlil</small>
+          <input name="anthropicApiKey" type="password" autocomplete="off" spellcheck="false" />
+        </label>
+        <label
+          >Kompaniyangiz nomi <small>— tahlilda «biz» tomoni</small>
+          <input name="companyName" type="text" autocomplete="off" />
+        </label>
+        <label
+          >Jamoa a’zolari <small>— ism va lavozim, vergul bilan</small>
+          <input
+            name="teamMembers"
+            type="text"
+            autocomplete="off"
+            placeholder="Masalan: Sardor (menejer), Dilnoza (dizayner)"
+          />
+        </label>
+        <label
+          >Suhbat tili
+          <select name="language">
+            <option value="uzb">O‘zbek (rus/ingliz so‘zlari aralash bo‘lsa ham)</option>
+            <option value="rus">Rus</option>
+            <option value="eng">Ingliz</option>
+            <option value="auto">Avtomatik aniqlash</option>
+          </select>
+        </label>
+        <div id="check-result" class="check-result" hidden>
+          <div id="check-eleven"></div>
+          <div id="check-claude"></div>
+        </div>
+        <p id="data-dir" class="hint left"></p>
+        <div class="dialog-actions">
+          <button type="button" class="ghost" id="settings-cancel">Yopish</button>
+          <button type="submit" class="primary small" id="settings-save">
+            Saqlash va tekshirish
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>

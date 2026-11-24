@@ -32,7 +32,9 @@
     "format": "prettier --write .",
     "recording-api:dev": "npm run dev --workspace @suhbat/recording-api",
     "recording-api:start": "npm run start --workspace @suhbat/recording-api",
-    "worker:start": "tsx packages/database/src/worker-daemon.ts"
+    "worker:start": "tsx packages/database/src/worker-daemon.ts",
+    "local": "npm install --prefix apps/local --omit=dev --no-audit --no-fund && node apps/local/server.mjs",
+    "test:local": "npm install --prefix apps/local --no-audit --no-fund && npm test --prefix apps/local"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
