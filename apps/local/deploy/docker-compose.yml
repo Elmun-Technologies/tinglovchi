@@ -1,0 +1,34 @@
+# SUHBAT + Caddy (avtomatik HTTPS). Ishga tushirish: shu papkada `docker compose up -d --build`.
+name: suhbat
+services:
+  suhbat:
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SUHBAT_PUBLIC_URL: https://${SUHBAT_DOMAIN:?SUHBAT_DOMAIN .env faylida berilishi shart}
+    volumes:
+      - suhbat-data:/data
+    expose:
+      - '4780'
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - suhbat
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      SUHBAT_DOMAIN: ${SUHBAT_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  suhbat-data:
+  caddy-data:
+  caddy-config:

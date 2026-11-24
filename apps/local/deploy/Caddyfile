@@ -1,0 +1,8 @@
+# Caddy domen uchun Let's Encrypt sertifikatini o'zi oladi va yangilab turadi.
+{$SUHBAT_DOMAIN} {
+	encode gzip
+	request_body {
+		max_size 2GB
+	}
+	reverse_proxy suhbat:4780
+}

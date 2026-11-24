@@ -516,3 +516,26 @@ dialog select:focus {
     border-radius: 36px;
   }
 }
+.login-form {
+  width: min(420px, 100%);
+}
+.login-form input {
+  width: 100%;
+  background: var(--soft);
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  padding: 16px 24px;
+  font-size: 18px;
+}
+.login-form input:focus {
+  outline: none;
+  border-color: var(--ink);
+  background: #fff;
+}
+.login-form .primary {
+  width: 100%;
+}
+.login-err {
+  color: #d63b1a;
+  margin: 0;
+}

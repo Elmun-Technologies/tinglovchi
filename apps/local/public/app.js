@@ -41,6 +41,11 @@ async function api(path, { method = 'GET', json, body, headers } = {}) {
     body: json ? JSON.stringify(json) : body,
   });
   const data = await res.json().catch(() => ({}));
+  // Server rejimida sessiya tugasa — kirish sahifasiga (yozuv paytida emas: yozuvni uzib qo'ymaslik uchun).
+  if (res.status === 401 && !rec.active) {
+    location.reload();
+    await new Promise(() => {});
+  }
   if (!res.ok)
     throw Object.assign(new Error(data.error || `Xato ${res.status}`), { status: res.status });
   return data;
@@ -111,13 +116,25 @@ function enqueue(task) {
         }
         break;
       } catch (err) {
-        if (err.status && err.status >= 400 && err.status < 500 && err.status !== 408) {
+        const retryable =
+          !err.status || err.status >= 500 || err.status === 408 || err.status === 401;
+        if (!retryable) {
           console.error('Parcha rad etildi', err);
           break;
         }
         rec.uploadFailing = true;
+        if (err.status === 401) {
+          banner(
+            'Sessiya tugagan. Yozuv davom etmoqda — boshqa tabda saytga qayta kiring, audio o‘zi yuboriladi.',
+            { error: true },
+          );
+          await new Promise((r) => setTimeout(r, 5000));
+          continue;
+        }
         banner(
-          'Audio diskka saqlanmayapti — dastur oynasi (qora oyna) yopilgan bo‘lishi mumkin. Qayta urinilmoqda…',
+          settings?.serverMode
+            ? 'Internet uzildi. Yozuv davom etmoqda, audio shu kompyuter xotirasida turibdi — internet qaytishi bilan yuboriladi. Sahifani YOPMANG.'
+            : 'Audio diskka saqlanmayapti — dastur oynasi (qora oyna) yopilgan bo‘lishi mumkin. Qayta urinilmoqda…',
           { error: true },
         );
         await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** attempt, 10000)));
@@ -460,6 +477,7 @@ async function refresh() {
     });
     return;
   }
+  $('btn-logout').hidden = !settings.serverMode;
   $('history-count').textContent = meetings.length ? `(${meetings.length})` : '';
   renderHistory();
   if (!rec.active && !rec.uploadFailing) {
@@ -673,6 +691,11 @@ $('btn-pause').onclick = togglePause;
 $('btn-new').onclick = goHome;
 $('btn-new2').onclick = goHome;
 $('btn-settings').onclick = openSettings;
+$('btn-logout').onclick = async () => {
+  if (rec.active) return;
+  await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+  location.reload();
+};
 $('btn-history').onclick = () => {
   $('history').hidden = !$('history').hidden;
   if (!$('history').hidden) refresh();

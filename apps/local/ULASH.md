@@ -3,6 +3,10 @@
 Kod tayyor va sinovdan o‘tgan. Quyidagilar faqat **sizning hisoblaringiz va kompyuteringiz** bilan bog‘liq —
 shularni ulasangiz, ishlaydi. Tartib bilan, har biri 1–5 daqiqa.
 
+> **Ikki yo‘l bor.** Shu kompyuterda ishlatish uchun quyidagi 1–5-qadamlar yetadi.
+> Hetzner serveriga qo‘yish uchun 1-qadam o‘rniga **[HETZNER.md](HETZNER.md)** ni dasturchiga bering
+> (unga yana domen kerak bo‘ladi), 2–5-qadamlar o‘zgarmaydi.
+
 ## 1. Kompyuterga Node.js (bir marta)
 
 - https://nodejs.org → **LTS** versiyani yuklab o‘rnating. Boshqa hech narsa kerak emas.

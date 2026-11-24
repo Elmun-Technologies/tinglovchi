@@ -31,6 +31,8 @@ Qo‘shimcha: to‘liq **transkript** (vaqt belgilari bilan) va Telegram/pochtag
 
 Namuna prezentatsiyani dastur ichida ko‘rish mumkin: **Suhbatlar → Namuna prezentatsiya**.
 
+> Serverga (Hetzner) o‘rnatish — **[HETZNER.md](HETZNER.md)**. Jamoa butun internet orqali, parol bilan kiradi.
+>
 > Sizdan kerak bo‘lgan narsalar (kalitlar, balans, birinchi sinov) — **[ULASH.md](ULASH.md)** da.
 
 ## Suhbat paytida boshqa oyna/brauzerga o‘tsangiz

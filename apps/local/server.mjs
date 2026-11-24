@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// SUHBAT Lokal — faqat shu kompyuterda ishlaydigan kichik server (127.0.0.1).
+// SUHBAT Lokal — kichik server. Ikki rejim:
+//  • lokal (standart): faqat shu kompyuterda, 127.0.0.1 da, parolsiz;
+//  • server (SUHBAT_PUBLIC_URL berilsa, masalan Hetzner): HTTPS proksi ortida, parol bilan.
 // Brauzer mikrofon orqali yozadi, server audio bo'laklarni diskka saqlaydi va tahlil qiladi.
 import http from 'node:http';
 import fs from 'node:fs';
@@ -40,9 +42,43 @@ const { renderPresentation } = await import('./lib/presentation.mjs');
 const { checkElevenlabs } = await import('./lib/stt.mjs');
 const { checkAnthropic } = await import('./lib/analyze.mjs');
 const { DEMO_ANALYSIS } = await import('./lib/demo.mjs');
+const { createAuth } = await import('./lib/auth.mjs');
 
 const PORT = Number(process.env.SUHBAT_PORT || 4780);
-const HOST = '127.0.0.1';
+const PUBLIC_URL = (process.env.SUHBAT_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+const SERVER_MODE = Boolean(PUBLIC_URL);
+const HOST = process.env.SUHBAT_HOST || (SERVER_MODE ? '0.0.0.0' : '127.0.0.1');
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
+
+let publicOrigin = null;
+let publicHost = null;
+let auth = null;
+function fatal(msg) {
+  console.error(`\n  XATO: ${msg}\n`);
+  process.exit(1);
+}
+if (SERVER_MODE) {
+  try {
+    const u = new URL(PUBLIC_URL);
+    publicOrigin = u.origin;
+    publicHost = u.host.toLowerCase();
+  } catch {
+    fatal(`SUHBAT_PUBLIC_URL noto‘g‘ri: ${PUBLIC_URL} (masalan: https://suhbat.firma.uz)`);
+  }
+  const password = process.env.SUHBAT_PASSWORD || '';
+  if (password.length < 10)
+    fatal('Server rejimida SUHBAT_PASSWORD kamida 10 belgidan iborat bo‘lishi shart.');
+  auth = createAuth({
+    password,
+    dataDir: DATA_DIR,
+    secure: publicOrigin.startsWith('https://'),
+    trustProxy: process.env.SUHBAT_TRUST_PROXY === '1',
+  });
+} else if (!LOOPBACK.has(HOST)) {
+  fatal(
+    'Tashqi tarmoqqa ochish uchun SUHBAT_PUBLIC_URL va SUHBAT_PASSWORD ni bering (server rejimi).',
+  );
+}
 const PUBLIC_DIR = path.join(HERE, 'public');
 const MAX_CHUNK_BYTES = 64 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -107,16 +143,51 @@ async function readJson(req) {
   }
 }
 
-// Faqat shu kompyuterdagi brauzerdan kelgan so'rovlarga ruxsat (DNS-rebinding va begona saytlardan himoya).
-function assertLocal(req) {
-  const allowedHosts = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
-  if (!allowedHosts.has(String(req.headers.host || '').toLowerCase()))
+// Faqat o'zimizning manzildan kelgan so'rovlarga ruxsat (DNS-rebinding va begona saytlardan himoya).
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`]);
+const ALLOWED_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+if (publicHost) {
+  ALLOWED_HOSTS.add(publicHost);
+  ALLOWED_ORIGINS.add(publicOrigin);
+}
+function assertAllowed(req) {
+  if (!ALLOWED_HOSTS.has(String(req.headers.host || '').toLowerCase()))
     throw new HttpError(403, 'Ruxsat yo‘q');
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const origin = req.headers.origin;
-    if (!origin || !allowedHosts.has(origin.replace(/^http:\/\//, '')))
-      throw new HttpError(403, 'Ruxsat yo‘q');
+    if (!origin || !ALLOWED_ORIGINS.has(origin)) throw new HttpError(403, 'Ruxsat yo‘q');
   }
+}
+
+// Server rejimida kirishsiz ochiladigan fayllar (kirish sahifasi va uning bezaklari).
+const PUBLIC_ASSETS = /^\/(style\.css|login\.html|fonts\/[a-z0-9-]+\.woff2)$/;
+
+/** true qaytarsa — so'rov shu yerning o'zida javob oldi (kirish sahifasi, 401 va h.k.). */
+async function handleAuth(req, res, url) {
+  if (url.pathname === '/api/login' && req.method === 'POST') {
+    const body = await readJson(req);
+    const result = auth.login(req, typeof body.password === 'string' ? body.password : '');
+    if (!result.ok) send(res, result.status, { error: result.error });
+    else send(res, 200, { ok: true }, { 'Set-Cookie': result.cookie });
+    return true;
+  }
+  if (url.pathname === '/api/logout' && req.method === 'POST') {
+    send(res, 200, { ok: true }, { 'Set-Cookie': auth.logoutCookie() });
+    return true;
+  }
+  if (auth.isAuthenticated(req)) return false;
+  if (url.pathname.startsWith('/api/')) {
+    send(res, 401, { error: 'Avval tizimga kiring' });
+    return true;
+  }
+  if (PUBLIC_ASSETS.test(url.pathname)) return false;
+  if (url.pathname !== '/') {
+    res.writeHead(302, { Location: '/', 'Cache-Control': 'no-store' });
+    res.end();
+    return true;
+  }
+  await serveFile(res, path.join(PUBLIC_DIR, 'login.html'));
+  return true;
 }
 
 function publicMeeting(m) {
@@ -147,6 +218,7 @@ function publicSettings() {
     language: s.language,
     dataDir: DATA_DIR,
     demo: DEMO,
+    serverMode: SERVER_MODE,
   };
 }
 
@@ -367,8 +439,9 @@ const MEETING_FILES = new Set([
 ]);
 
 async function route(req, res) {
-  assertLocal(req);
-  const url = new URL(req.url, `http://${HOST}:${PORT}`);
+  assertAllowed(req);
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  if (auth && (await handleAuth(req, res, url))) return;
   if (url.pathname.startsWith('/api/')) return api(req, res, url);
   if (req.method !== 'GET' && req.method !== 'HEAD')
     throw new HttpError(405, 'Ruxsat etilmagan usul');
@@ -398,6 +471,12 @@ async function route(req, res) {
 }
 
 const server = http.createServer((req, res) => {
+  if (SERVER_MODE) {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'same-origin');
+    if (publicOrigin.startsWith('https://'))
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  }
   route(req, res).catch((err) => {
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error(err);
@@ -410,7 +489,7 @@ server.requestTimeout = 0;
 server.headersTimeout = 60_000;
 
 function openBrowser(target) {
-  if (process.env.SUHBAT_NO_OPEN === '1') return;
+  if (process.env.SUHBAT_NO_OPEN === '1' || SERVER_MODE) return;
   const cmd =
     process.platform === 'win32'
       ? ['cmd', ['/c', 'start', '', target]]
@@ -452,7 +531,9 @@ server.on('error', (err) => {
 });
 await recover();
 server.listen(PORT, HOST, () => {
-  console.log(`\n  SUHBAT Lokal ishga tushdi:  ${appUrl}`);
+  console.log(
+    `\n  SUHBAT ishga tushdi:  ${SERVER_MODE ? `${PUBLIC_URL} (server rejimi, ${HOST}:${PORT})` : appUrl}`,
+  );
   console.log(`  Ma'lumotlar papkasi:        ${DATA_DIR}`);
   if (DEMO)
     console.log(
