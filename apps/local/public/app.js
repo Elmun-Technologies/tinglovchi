@@ -478,6 +478,9 @@ async function refresh() {
     return;
   }
   $('btn-logout').hidden = !settings.serverMode;
+  if (settings.serverMode)
+    $('rec-note').textContent =
+      'Audio har 5 soniyada serverga yuborilmoqda. Bu sahifani yopmang va kompyuterni uxlatmang.';
   $('history-count').textContent = meetings.length ? `(${meetings.length})` : '';
   renderHistory();
   if (!rec.active && !rec.uploadFailing) {
