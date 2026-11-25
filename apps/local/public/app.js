@@ -591,6 +591,9 @@ function openSettings() {
   f.teamMembers.value = settings?.teamMembers || '';
   f.language.value = settings?.language || 'uzb';
   $('check-result').hidden = true;
+  if (settings?.serverMode)
+    $('keys-hint').textContent =
+      'Kalitlar serverda saqlanadi va brauzerga hech qachon qaytarilmaydi. Bir marta kiritiladi.';
   $('settings-save').textContent = 'Saqlash va tekshirish';
   $('data-dir').textContent = settings
     ? `Yozuvlar va tahlillar shu papkada saqlanadi: ${settings.dataDir}`
