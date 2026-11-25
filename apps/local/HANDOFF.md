@@ -116,6 +116,8 @@ Hamma narsa `apps/local/` ichida (Node.js 22, framework yo‘q, bitta tashqi kut
 - Yangi API maydoni qo‘shsangiz: `ANALYSIS_SCHEMA` (analyze.mjs) ↔ `normalizeAnalysis` ↔ `presentation.mjs`
   ↔ `demo.mjs` ↔ `test/unit.test.mjs` bir-biriga mos bo‘lishi shart (test buni tekshiradi).
 
+> Batafsil, bosqichlarga bo‘lingan reja: **[ROADMAP.md](ROADMAP.md)**.
+
 ## 8. Keyingi ishlar (tartib bilan)
 
 1. Haqiqiy kalitlar bilan birinchi sinov (§5), xatolarni tuzatish.
