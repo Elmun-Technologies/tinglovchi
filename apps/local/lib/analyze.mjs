@@ -165,51 +165,73 @@ export async function analyzeTranscript({
 
   onProgress('Claude suhbatni tahlil qilmoqda');
   const userContent = `${contextBlock(settings, meeting)}\n\n<${materialLabel}>\n${material}\n</${materialLabel}>\n\nYuqoridagi suhbatni qoidalarga muvofiq tahlil qiling.`;
-  let message;
-  try {
-    message = await client.beta.messages
-      .stream({
-        model: MODEL,
-        max_tokens: 64000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        thinking: { type: 'adaptive' },
+
+  // Asl API'da bu sxema «grammar too large» xatosi bilan rad etiladi, shuning uchun standart yo'l —
+  // sxemani ko'rsatmada berib, oddiy JSON so'rash (natija baribir normalizeAnalysis'dan o'tadi).
+  // SUHBAT_STRUCTURED_OUTPUT=1 — qat'iy sxema rejimini sinab ko'rish uchun.
+  let structured = process.env.SUHBAT_STRUCTURED_OUTPUT === '1';
+  let analysis = null;
+  let lastError = null;
+  for (let attempt = 0; attempt < 2 && !analysis; attempt++) {
+    let message;
+    try {
+      message = await askClaude(client, { structured, userContent });
+    } catch (err) {
+      if (!structured || !(err instanceof Anthropic.BadRequestError)) throw err;
+      console.warn('Tuzilgan javob rejimi rad etildi, oddiy rejimga o‘tildi:', err.message);
+      onProgress('Claude suhbatni tahlil qilmoqda (zaxira rejim)');
+      structured = false;
+      message = await askClaude(client, { structured, userContent });
+    }
+    if (message.stop_reason === 'refusal') {
+      const err = new Error('Claude bu suhbatni tahlil qilishdan bosh tortdi.');
+      err.retryable = false;
+      throw err;
+    }
+    if (message.stop_reason === 'max_tokens') {
+      throw new Error('Tahlil javobi juda uzun bo‘lib ketdi va kesildi. Qayta urinib ko‘ring.');
+    }
+    const out = message.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+    try {
+      analysis = normalizeAnalysis(parseJsonObject(out));
+      analysis._model = message.model;
+      analysis._usage = message.usage;
+    } catch (err) {
+      lastError = err; // javob JSON bo'lmasa — bir marta qayta so'raymiz
+      console.warn('Tahlil javobini o‘qib bo‘lmadi, qayta urinilmoqda:', err.message);
+    }
+  }
+  if (!analysis) throw lastError;
+  return analysis;
+}
+
+const PLAIN_JSON_RULE = (schema) =>
+  `${SYSTEM}\n\nJavobni FAQAT bitta JSON obyekt ko'rinishida qaytaring (izohsiz, markdown belgilarisiz). JSON quyidagi JSON Schema'ga to'liq mos bo'lsin (hamma maydon bo'lsin, ma'lumot bo'lmasa bo'sh massiv yoki bo'sh qator):\n${JSON.stringify(schema)}`;
+
+async function askClaude(client, { structured, userContent }) {
+  const common = {
+    model: MODEL,
+    max_tokens: 64000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    thinking: { type: 'adaptive' },
+    messages: [{ role: 'user', content: userContent }],
+  };
+  const stream = structured
+    ? client.beta.messages.stream({
+        ...common,
         output_config: { effort: 'high', format: { type: 'json_schema', schema: ANALYSIS_SCHEMA } },
         system: SYSTEM,
-        messages: [{ role: 'user', content: userContent }],
       })
-      .finalMessage();
-  } catch (err) {
-    if (!(err instanceof Anthropic.BadRequestError)) throw err;
-    // Zaxira yo'l: agar API qat'iy JSON-sxema yoki beta parametrlarini qabul qilmasa,
-    // sxemani ko'rsatma ichida berib, oddiy so'rov yuboramiz.
-    console.warn('Tuzilgan javob rejimi rad etildi, oddiy rejimga o‘tildi:', err.message);
-    onProgress('Claude suhbatni tahlil qilmoqda (zaxira rejim)');
-    message = await client.messages
-      .stream({
-        model: MODEL,
-        max_tokens: 64000,
-        system: `${SYSTEM}\n\nJavobni FAQAT bitta JSON obyekt ko'rinishida qaytaring (izohsiz, markdown belgilarisiz). JSON quyidagi JSON Schema'ga to'liq mos bo'lsin:\n${JSON.stringify(ANALYSIS_SCHEMA)}`,
-        messages: [{ role: 'user', content: userContent }],
-      })
-      .finalMessage();
-  }
-  if (message.stop_reason === 'refusal') {
-    const err = new Error('Claude bu suhbatni tahlil qilishdan bosh tortdi.');
-    err.retryable = false;
-    throw err;
-  }
-  if (message.stop_reason === 'max_tokens') {
-    throw new Error('Tahlil javobi juda uzun bo‘lib ketdi va kesildi. Qayta urinib ko‘ring.');
-  }
-  const text = message.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('');
-  const analysis = normalizeAnalysis(parseJsonObject(text));
-  analysis._model = message.model;
-  analysis._usage = message.usage;
-  return analysis;
+    : client.beta.messages.stream({
+        ...common,
+        output_config: { effort: 'high' },
+        system: PLAIN_JSON_RULE(ANALYSIS_SCHEMA),
+      });
+  return stream.finalMessage();
 }
 
 function parseJsonObject(text) {

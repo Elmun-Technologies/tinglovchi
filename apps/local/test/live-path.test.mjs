@@ -18,6 +18,9 @@ const ORIGIN = { Origin: `http://127.0.0.1:${PORT}` };
 const seen = { stt: [], claude: [] };
 let rejectStructured = false;
 let child;
+let child2; // standart (oddiy JSON) rejimdagi ikkinchi server
+let dataDir2;
+const PORT2 = 4797;
 let mock;
 let dataDir;
 
@@ -128,9 +131,11 @@ before(async () => {
   await new Promise((r) => mock.listen(MOCK_PORT, '127.0.0.1', r));
 
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'suhbat-live-'));
+  dataDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'suhbat-live2-'));
   const env = {
     ...process.env,
     SUHBAT_NO_OPEN: '1',
+    SUHBAT_STRUCTURED_OUTPUT: '1', // bu server qat'iy sxema yo'lini sinaydi
     SUHBAT_PORT: String(PORT),
     SUHBAT_DATA_DIR: dataDir,
     ELEVENLABS_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
@@ -147,18 +152,27 @@ before(async () => {
     'http_proxy',
   ])
     delete env[k];
-  child = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], {
-    env,
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  await new Promise((resolve, reject) => {
-    child.stdout.on('data', (d) => String(d).includes('ishga tushdi') && resolve());
-    child.on('exit', (code) => reject(new Error(`server chiqib ketdi: ${code}`)));
-  });
+  const start = (e) => {
+    const proc = spawn(process.execPath, [path.join(HERE, '..', 'server.mjs')], {
+      env: e,
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    return new Promise((resolve, reject) => {
+      proc.stdout.on('data', (d) => String(d).includes('ishga tushdi') && resolve(proc));
+      proc.on('exit', (code) => reject(new Error(`server chiqib ketdi: ${code}`)));
+    });
+  };
+  child = await start(env);
+  const env2 = { ...env, SUHBAT_PORT: String(PORT2), SUHBAT_DATA_DIR: dataDir2 };
+  delete env2.SUHBAT_STRUCTURED_OUTPUT;
+  child2 = await start(env2);
 });
 after(async () => {
   child.removeAllListeners('exit');
   child.kill();
+  child2.removeAllListeners('exit');
+  child2.kill();
+  fs.rmSync(dataDir2, { recursive: true, force: true });
   await new Promise((r) => mock.close(r));
   mock.closeAllConnections?.();
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -246,7 +260,8 @@ test('Claude tuzilgan javob rejimini rad etsa, zaxira yo‘l bilan baribir natij
   rejectStructured = false;
   assert.equal(ready.status, 'ready', ready.error);
   assert.equal(seen.claude.length, 2);
-  assert.equal(seen.claude[1].body.output_config, undefined);
+  assert.equal(seen.claude[1].body.output_config.format, undefined);
+  assert.equal(seen.claude[1].body.output_config.effort, 'high');
   assert.match(seen.claude[1].body.system, /JSON Schema/);
   const html = await (await fetch(`${BASE}/m/${id}/presentation.html`)).text();
   assert.ok(html.includes('Soxta server tahlili'));
@@ -262,4 +277,49 @@ test('noto‘g‘ri kalitlar: tekshiruv aniq sababni ko‘rsatadi', async () => 
   await post('/api/settings', {
     json: { elevenlabsApiKey: 'el-key', anthropicApiKey: 'sk-ant-api03-test' },
   });
+});
+
+test('standart rejim: sxema ko‘rsatmada beriladi, qat’iy format so‘ralmaydi («grammar too large» bo‘lmasligi uchun)', async () => {
+  const base = `http://127.0.0.1:${PORT2}`;
+  const origin = { Origin: base };
+  const call = (url, init = {}) =>
+    fetch(base + url, { ...init, headers: { ...origin, ...(init.headers || {}) } });
+  await call('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ elevenlabsApiKey: 'el-key', anthropicApiKey: 'sk-ant-api03-test' }),
+  });
+  seen.claude.length = 0;
+  const { meeting } = await (
+    await call('/api/meetings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+  ).json();
+  await call(`/api/meetings/${meeting.id}/chunk?seg=1&seq=0&startMs=0&t=6000`, {
+    method: 'POST',
+    body: Buffer.alloc(6000, 1),
+    headers: { 'Content-Type': 'audio/webm' },
+  });
+  await call(`/api/meetings/${meeting.id}/finish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ durationMs: 6000 }),
+  });
+  let done;
+  for (let i = 0; i < 150; i++) {
+    done = (await (await call(`/api/meetings/${meeting.id}`)).json()).meeting;
+    if (done.status !== 'processing') break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.equal(done.status, 'ready', done.error);
+  assert.equal(seen.claude.length, 1, 'bitta so‘rov, qayta urinishsiz');
+  const { body } = seen.claude[0];
+  assert.equal(body.output_config.format, undefined);
+  assert.equal(body.output_config.effort, 'high');
+  assert.equal(body.fallbacks, 'default');
+  assert.match(body.system, /JSON Schema/);
+  const html = await (await call(`/m/${meeting.id}/presentation.html`)).text();
+  assert.ok(html.includes('Soxta server tahlili'));
 });
