@@ -1,5 +1,46 @@
 # SUHBAT’ni Hetzner serveriga o‘rnatish
 
+## Eng tez yo‘l — bitta buyruq (5 daqiqa)
+
+1. **Hetzner Cloud Console** → serveringiz → yuqoridagi **`>_` (Console)** tugmasi (yoki `ssh root@<server IP>`).
+2. Quyidagi buyruqni qo‘ying va Enter bosing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Elmun-Technologies/tinglovchi/main/apps/local/deploy/install.sh | sudo bash
+```
+
+> Bu o‘rnatuvchi hali `main`ga qo‘shilmagan bo‘lsa, `main` o‘rniga branch nomini yozing:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/Elmun-Technologies/tinglovchi/claude/nice-hopper-1dfpx9/apps/local/deploy/install.sh | sudo SUHBAT_BRANCH=claude/nice-hopper-1dfpx9 bash
+> ```
+
+3. Oxirida ekranda **sayt manzili** va **jamoa paroli** chiqadi. Saytni oching → parol bilan kiring →
+   **⚙ Sozlamalar** → ElevenLabs va Anthropic kalitlarini kiriting → **«Saqlash va tekshirish»**.
+
+Skript o‘zi: Docker’ni o‘rnatadi (bo‘lmasa), kodni `/opt/tinglovchi` ga yuklaydi, parol yaratadi, faervolda (ufw)
+80/443 ni ochadi, ilova va HTTPS (Caddy + Let’s Encrypt) ni ishga tushiradi va sayt ishlaganini tekshiradi.
+
+- **Domen shart emas.** Domen berilmasa, `95-217-10-20.sslip.io` ko‘rinishidagi bepul manzil ishlatiladi (server IP
+  manzilidan) — unga ham haqiqiy HTTPS sertifikat olinadi.
+- **O‘z domeningiz bilan** (avval DNS’da A-yozuvni server IP manziliga qarating):
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/Elmun-Technologies/tinglovchi/main/apps/local/deploy/install.sh | sudo SUHBAT_DOMAIN=suhbat.firma.uz bash
+  ```
+
+- **Yangilash** — xuddi shu buyruqni qayta ishga tushiring: kod yangilanadi, parol, domen va kalitlar saqlanadi.
+- **O‘z parolingiz bilan:** `sudo SUHBAT_PASSWORD='kamida-10-belgi' bash` (buyruq oxirida).
+- **Sinab ko‘rish (hech narsa o‘zgartirmaydi):** buyruq oxiriga `-s -- --dry-run` qo‘shing: `... | sudo bash -s -- --dry-run`.
+- Hetzner Cloud Console’da serverga **Firewall** ulangan bo‘lsa, unda 80 va 443 portlari ochiq bo‘lsin.
+
+Quyida — xuddi shu ishni qadamma-qadam, qo‘lda qilish yo‘riqnomasi (skript ishlamasa yoki nimalar bo‘layotganini
+bilish kerak bo‘lsa).
+
+---
+
+## Qo‘lda o‘rnatish
+
 Bu yo‘riqnoma **istalgan dasturchi** uchun: Linux, SSH va Docker’ni bilsa yetadi. Taxminan **20–30 daqiqa**.
 
 ---
@@ -78,10 +119,10 @@ yoki shaxsiy token sozlang.
 git clone https://github.com/Elmun-Technologies/tinglovchi.git /opt/tinglovchi
 ```
 
-SUHBAT kodi hozircha `claude/nice-hopper-1dfpx9` branchida. U `main`ga qo‘shilmagan bo‘lsa:
+Boshqa branchdan o‘rnatish kerak bo‘lsa (masalan, hali `main`ga qo‘shilmagan o‘zgarishlar):
 
 ```bash
-git -C /opt/tinglovchi checkout claude/nice-hopper-1dfpx9
+git -C /opt/tinglovchi checkout <branch-nomi>
 ```
 
 ## 5. Sozlash
@@ -206,4 +247,5 @@ apps/local/
     docker-compose.yml     ← ilova + Caddy (HTTPS)
     Caddyfile              ← domen → ilova, 2 GB gacha fayl yuklash
     .env.example           ← sozlamalar namunasi
+    install.sh             ← bitta buyruq bilan o‘rnatish / yangilash
 ```
