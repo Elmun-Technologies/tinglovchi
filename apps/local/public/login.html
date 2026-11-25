@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="uz">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SUHBAT — kirish</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="top"><div class="brand">SUHBAT</div></header>
+    <main id="stage">
+      <form id="login" class="view login-form">
+        <h2>Kirish</h2>
+        <p class="hint">Jamoa parolini kiriting.</p>
+        <input
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          placeholder="Parol"
+          required
+          autofocus
+        />
+        <button class="primary" type="submit">Kirish</button>
+        <p id="err" class="login-err" hidden></p>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById('login');
+      const err = document.getElementById('err');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        err.hidden = true;
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: form.password.value }),
+        }).catch(() => null);
+        if (res && res.ok) return location.replace('/');
+        const data = res ? await res.json().catch(() => ({})) : {};
+        err.textContent = data.error || 'Server bilan aloqa yo‘q';
+        err.hidden = false;
+      });
+    </script>
+  </body>
+</html>
