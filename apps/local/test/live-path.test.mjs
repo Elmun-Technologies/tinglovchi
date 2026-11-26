@@ -15,7 +15,8 @@ const PORT = 4792;
 const MOCK_PORT = 4793;
 const BASE = `http://127.0.0.1:${PORT}`;
 const ORIGIN = { Origin: `http://127.0.0.1:${PORT}` };
-const seen = { stt: [], claude: [] };
+const seen = { stt: [], claude: [], vl: [] };
+let vlPolls = 0;
 let rejectStructured = false;
 let child;
 let child2; // standart (oddiy JSON) rejimdagi ikkinchi server
@@ -36,6 +37,47 @@ before(async () => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const body = Buffer.concat(chunks);
+    if (req.url === '/v1/stt' && req.method === 'POST') {
+      seen.vl.push({
+        auth: req.headers.authorization,
+        idem: Boolean(req.headers['idempotency-key']),
+        language: body.toString('latin1').match(/name="language"\r\n\r\n([^\r]*)/)?.[1],
+        speakers: body.toString('latin1').match(/name="include_speakers"\r\n\r\n([^\r]*)/)?.[1],
+        hasAudio: /name="audio"; filename="/.test(body.toString('latin1')),
+      });
+      if (req.headers.authorization !== 'Bearer vlk_good') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end('{"error":{"code":"invalid_api_key","message":"bad key"}}');
+      }
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      return res.end('{"id":"tr_1","status":"queued"}');
+    }
+    if (req.url === '/v1/stt/transcriptions/tr_1') {
+      vlPolls++;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (vlPolls < 2) return res.end('{"id":"tr_1","status":"processing"}');
+      return res.end(
+        JSON.stringify({
+          id: 'tr_1',
+          status: 'completed',
+          language: 'uz',
+          speakers: [
+            { id: 'a', display_name: 'A' },
+            { id: 'b', display_name: 'B' },
+          ],
+          segments: [
+            { ordinal: 0, start_ms: 200, end_ms: 600, text: 'Salom.', speaker: 'a' },
+            {
+              ordinal: 1,
+              start_ms: 3500,
+              end_ms: 5200,
+              text: 'Shartnomani juma kuni yuboramiz.',
+              speaker: 'b',
+            },
+          ],
+        }),
+      );
+    }
     if (req.url === '/v1/speech-to-text') {
       const raw = body.toString('latin1');
       const field = (name) => raw.match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r]*)`))?.[1];
@@ -139,6 +181,8 @@ before(async () => {
     SUHBAT_PORT: String(PORT),
     SUHBAT_DATA_DIR: dataDir,
     ELEVENLABS_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
+    VOICELAB_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
+    VOICELAB_POLL_MS: '50',
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
   };
   for (const k of [
@@ -146,6 +190,7 @@ before(async () => {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_AUTH_TOKEN',
     'ELEVENLABS_API_KEY',
+    'VOICELAB_API_KEY',
     'HTTPS_PROXY',
     'HTTP_PROXY',
     'https_proxy',
@@ -219,9 +264,9 @@ test('kalitlarsiz: yozuv saqlanadi, tahlil tushunarli xabar bilan to‘xtaydi; k
     },
   });
   const check = await (await post('/api/check')).json();
-  assert.equal(check.elevenlabs.ok, true, check.elevenlabs.message);
+  assert.equal(check.stt.ok, true, check.stt.message);
   assert.equal(check.anthropic.ok, true, check.anthropic.message);
-  assert.match(check.elevenlabs.message, /scribe_v2/); // scribe_v1 rad etildi → keyingi model
+  assert.match(check.stt.message, /scribe_v2/); // scribe_v1 rad etildi → keyingi model
 
   seen.stt.length = 0;
   seen.claude.length = 0;
@@ -270,13 +315,59 @@ test('Claude tuzilgan javob rejimini rad etsa, zaxira yo‘l bilan baribir natij
 test('noto‘g‘ri kalitlar: tekshiruv aniq sababni ko‘rsatadi', async () => {
   await post('/api/settings', { json: { elevenlabsApiKey: 'xato', anthropicApiKey: 'xato' } });
   const check = await (await post('/api/check')).json();
-  assert.equal(check.elevenlabs.ok, false);
-  assert.match(check.elevenlabs.message, /kaliti noto'g'ri/);
+  assert.equal(check.stt.ok, false);
+  assert.match(check.stt.message, /kaliti noto'g'ri/);
   assert.equal(check.anthropic.ok, false);
   assert.match(check.anthropic.message, /401/);
   await post('/api/settings', {
     json: { elevenlabsApiKey: 'el-key', anthropicApiKey: 'sk-ant-api03-test' },
   });
+});
+
+test('VoiceLab: kalit tekshiriladi, audio yuboriladi, natija kutiladi, audio yuklab olinadi', async () => {
+  await post('/api/settings', {
+    json: {
+      voicelabApiKey: 'vlk_bad',
+      sttProvider: 'voicelab',
+      anthropicApiKey: 'sk-ant-api03-test',
+    },
+  });
+  const bad = await (await post('/api/check')).json();
+  assert.equal(bad.stt.ok, false);
+  assert.match(bad.stt.message, /VoiceLab kaliti noto'g'ri/);
+
+  await post('/api/settings', { json: { voicelabApiKey: 'vlk_good' } });
+  const good = await (await post('/api/check')).json();
+  assert.equal(good.stt.ok, true, good.stt.message);
+
+  seen.vl.length = 0;
+  seen.stt.length = 0;
+  seen.claude.length = 0;
+  vlPolls = 0;
+  const id = await record();
+  const ready = await settle(id);
+  assert.equal(ready.status, 'ready', ready.error);
+  assert.equal(seen.stt.length, 0); // ElevenLabs chaqirilmagan
+  assert.equal(seen.vl.length, 1);
+  assert.deepEqual(seen.vl[0], {
+    auth: 'Bearer vlk_good',
+    idem: true,
+    language: 'uz',
+    speakers: 'true',
+    hasAudio: true,
+  });
+  const prompt = seen.claude[0].body.messages[0].content;
+  assert.match(prompt, /\[00:00:00\] Q1\/S1: Salom\./);
+  assert.match(prompt, /\[00:00:03\] Q1\/S2: Shartnomani juma kuni yuboramiz\./);
+
+  // yozib olingan audio brauzerdan topiladi
+  assert.equal(ready.audio.length, 1);
+  const audio = await fetch(`${BASE}/m/${id}/audio/${ready.audio[0].file}`);
+  assert.equal(audio.status, 200);
+  assert.match(audio.headers.get('content-type'), /^audio\//);
+  assert.equal((await fetch(`${BASE}/m/${id}/audio/..%2Fmeeting.json`)).status, 404);
+
+  await post('/api/settings', { json: { sttProvider: '' } });
 });
 
 test('standart rejim: sxema ko‘rsatmada beriladi, qat’iy format so‘ralmaydi («grammar too large» bo‘lmasligi uchun)', async () => {

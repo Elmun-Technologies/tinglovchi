@@ -1,6 +1,10 @@
 // Nutqni matnga aylantirish: ElevenLabs Scribe (o'zbek, rus, ingliz va 90+ til, spikerlarni ajratish).
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { SttError } from './stt-error.mjs';
+import { transcribeVoicelab, checkVoicelab } from './voicelab.mjs';
+
+export { SttError };
 
 const ENDPOINT = `${(process.env.ELEVENLABS_BASE_URL || 'https://api.elevenlabs.io').replace(/\/$/, '')}/v1/speech-to-text`;
 const MODELS = (process.env.ELEVENLABS_STT_MODEL || 'scribe_v1,scribe_v2')
@@ -23,11 +27,39 @@ const MIME = {
   '.flac': 'audio/flac',
 };
 
-export class SttError extends Error {
-  constructor(message, { retryable = true } = {}) {
-    super(message);
-    this.retryable = retryable;
-  }
+/**
+ * Qaysi xizmat ishlatilishini aniqlaydi: sozlamada aniq tanlangan bo'lsa — o'sha;
+ * «avto» bo'lsa — VoiceLab kaliti bor bo'lsa VoiceLab, aks holda ElevenLabs.
+ * @returns {{provider: 'voicelab'|'elevenlabs', apiKey: string}}
+ */
+export function sttConfig(settings) {
+  const pick = settings.sttProvider;
+  const provider =
+    pick === 'voicelab' || pick === 'elevenlabs'
+      ? pick
+      : settings.voicelabApiKey
+        ? 'voicelab'
+        : 'elevenlabs';
+  return {
+    provider,
+    apiKey: provider === 'voicelab' ? settings.voicelabApiKey : settings.elevenlabsApiKey,
+  };
+}
+
+export const providerLabel = (provider) => (provider === 'voicelab' ? 'VoiceLab' : 'ElevenLabs');
+
+/** Tanlangan xizmat orqali bitta audio faylni transkripsiya qiladi. */
+export function transcribeWith(settings, filePath) {
+  const { provider, apiKey } = sttConfig(settings);
+  return provider === 'voicelab'
+    ? transcribeVoicelab(filePath, { apiKey, language: settings.language })
+    : transcribeFile(filePath, { apiKey, language: settings.language });
+}
+
+/** Tanlangan xizmat kalitini tekshiradi. */
+export function checkStt(settings) {
+  const { provider, apiKey } = sttConfig(settings);
+  return provider === 'voicelab' ? checkVoicelab(apiKey) : checkElevenlabs(apiKey);
 }
 
 /**

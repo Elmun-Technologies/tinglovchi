@@ -126,7 +126,20 @@
           Kalitlar faqat shu kompyuterda saqlanadi. Bir marta kiritiladi.
         </p>
         <label
-          >ElevenLabs API kaliti <small>— nutqni matnga aylantirish</small>
+          >Nutqni matnga aylantirish xizmati
+          <select name="sttProvider">
+            <option value="">Avtomatik (VoiceLab kaliti bo‘lsa — VoiceLab)</option>
+            <option value="voicelab">VoiceLab (voicelab.uz)</option>
+            <option value="elevenlabs">ElevenLabs</option>
+          </select>
+        </label>
+        <label
+          >VoiceLab API kaliti
+          <small>— voicelab.uz → Developer → API keys (stt:write ruxsati)</small>
+          <input name="voicelabApiKey" type="password" autocomplete="off" spellcheck="false" />
+        </label>
+        <label
+          >ElevenLabs API kaliti <small>— zaxira</small>
           <input name="elevenlabsApiKey" type="password" autocomplete="off" spellcheck="false" />
         </label>
         <label

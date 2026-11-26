@@ -17,10 +17,14 @@ fs.mkdirSync(MEETINGS_DIR, { recursive: true });
 const DEFAULT_SETTINGS = {
   anthropicApiKey: '',
   elevenlabsApiKey: '',
+  voicelabApiKey: '',
+  sttProvider: '', // '' = avto (VoiceLab kaliti bo'lsa VoiceLab), 'voicelab' | 'elevenlabs'
   companyName: '',
   teamMembers: '',
   language: 'uzb',
 };
+
+const SECRET_KEYS = new Set(['anthropicApiKey', 'elevenlabsApiKey', 'voicelabApiKey']);
 
 async function writeJsonAtomic(file, value) {
   const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
@@ -40,6 +44,7 @@ export function readSettings() {
   // Muhit o'zgaruvchilari (yoki .env) sozlamalar faylidan ustun turadi.
   if (process.env.ANTHROPIC_API_KEY) merged.anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   if (process.env.ELEVENLABS_API_KEY) merged.elevenlabsApiKey = process.env.ELEVENLABS_API_KEY;
+  if (process.env.VOICELAB_API_KEY) merged.voicelabApiKey = process.env.VOICELAB_API_KEY;
   return merged;
 }
 
@@ -55,7 +60,8 @@ export async function saveSettings(patch) {
     if (typeof patch[key] !== 'string') continue;
     const value = patch[key].trim();
     // Kalit maydonlari bo'sh yuborilsa, eskisi saqlanib qoladi (UI kalitni qayta ko'rsatmaydi).
-    if ((key === 'anthropicApiKey' || key === 'elevenlabsApiKey') && value === '') continue;
+    if (SECRET_KEYS.has(key) && value === '') continue;
+    if (key === 'sttProvider' && !['', 'voicelab', 'elevenlabs'].includes(value)) continue;
     next[key] = value;
   }
   await writeJsonAtomic(SETTINGS_FILE, next);

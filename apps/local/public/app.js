@@ -485,7 +485,7 @@ async function refresh() {
   renderHistory();
   if (!rec.active && !rec.uploadFailing) {
     if (settings.demo) banner('Sinov rejimi: haqiqiy tahlil o‘rniga namuna ma’lumot ko‘rsatiladi.');
-    else if (!settings.hasAnthropic || !settings.hasElevenlabs) {
+    else if (!settings.hasAnthropic || !settings.hasStt) {
       banner('Tahlil ishlashi uchun API kalitlarini bir marta kiriting.', {
         action: { label: 'Kiritish', onClick: openSettings },
       });
@@ -559,6 +559,11 @@ function renderHistory() {
         }),
       );
     }
+    (m.audio || []).forEach((a, i, all) =>
+      actions.append(
+        link(all.length > 1 ? `Audio ${i + 1}` : 'Audio', `/m/${m.id}/audio/${a.file}`),
+      ),
+    );
     if (m.status !== 'processing') {
       actions.append(
         button('O‘chirish', async () => {
@@ -580,7 +585,12 @@ function renderHistory() {
 function openSettings() {
   const f = $('settings-form');
   f.elevenlabsApiKey.value = '';
+  f.voicelabApiKey.value = '';
   f.anthropicApiKey.value = '';
+  f.sttProvider.value = settings?.sttProvider || '';
+  f.voicelabApiKey.placeholder = settings?.hasVoicelab
+    ? 'Saqlangan ✓ (o‘zgartirish uchun yangisini kiriting)'
+    : 'vlk_…';
   f.elevenlabsApiKey.placeholder = settings?.hasElevenlabs
     ? 'Saqlangan ✓ (o‘zgartirish uchun yangisini kiriting)'
     : 'sk_…';
@@ -619,6 +629,8 @@ $('settings-form').addEventListener('submit', async (e) => {
       method: 'POST',
       json: {
         elevenlabsApiKey: f.elevenlabsApiKey.value,
+        voicelabApiKey: f.voicelabApiKey.value,
+        sttProvider: f.sttProvider.value,
         anthropicApiKey: f.anthropicApiKey.value,
         companyName: f.companyName.value,
         teamMembers: f.teamMembers.value,
@@ -626,16 +638,21 @@ $('settings-form').addEventListener('submit', async (e) => {
       },
     });
     f.elevenlabsApiKey.value = '';
+    f.voicelabApiKey.value = '';
     f.anthropicApiKey.value = '';
     await refresh();
     // Kalitlar haqiqatan ishlashini shu yerning o'zida ko'rsatamiz.
     $('check-result').hidden = false;
-    setCheck('check-eleven', 'ElevenLabs (transkripsiya)', null);
+    setCheck('check-eleven', 'Transkripsiya', null);
     setCheck('check-claude', 'Claude (tahlil)', null);
     const result = await api('/api/check', { method: 'POST' });
-    setCheck('check-eleven', 'ElevenLabs (transkripsiya)', result.elevenlabs);
+    setCheck(
+      'check-eleven',
+      `${result.stt.provider || 'Transkripsiya'} (transkripsiya)`,
+      result.stt,
+    );
     setCheck('check-claude', 'Claude (tahlil)', result.anthropic);
-    if (result.elevenlabs.ok && result.anthropic.ok) {
+    if (result.stt.ok && result.anthropic.ok) {
       save.textContent = 'Hammasi tayyor ✓';
       setTimeout(() => $('settings').close(), 1500);
     }

@@ -39,7 +39,7 @@ const {
 const { processMeeting, transcribeSegment, isProcessing, whenIdle, DEMO } =
   await import('./lib/pipeline.mjs');
 const { renderPresentation } = await import('./lib/presentation.mjs');
-const { checkElevenlabs } = await import('./lib/stt.mjs');
+const { checkStt, sttConfig, providerLabel } = await import('./lib/stt.mjs');
 const { checkAnthropic } = await import('./lib/analyze.mjs');
 const { DEMO_ANALYSIS } = await import('./lib/demo.mjs');
 const { createAuth } = await import('./lib/auth.mjs');
@@ -92,6 +92,12 @@ const STATIC_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
   '.md': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webm': 'audio/webm',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
 };
 const AUDIO_EXT = {
   'audio/webm': 'webm',
@@ -204,6 +210,9 @@ function publicMeeting(m) {
     error: m.error,
     counts: m.counts || null,
     segments: m.segments.length,
+    audio: m.segments
+      .filter((s) => s.bytes > 0)
+      .map((s) => ({ index: s.index, file: s.file, bytes: s.bytes })),
     transcribed: m.segments.filter((s) => s.stt === 'done').length,
   };
 }
@@ -213,6 +222,10 @@ function publicSettings() {
   return {
     hasAnthropic: Boolean(s.anthropicApiKey) || DEMO,
     hasElevenlabs: Boolean(s.elevenlabsApiKey) || DEMO,
+    hasVoicelab: Boolean(s.voicelabApiKey) || DEMO,
+    hasStt: Boolean(sttConfig(s).apiKey) || DEMO,
+    sttProvider: s.sttProvider,
+    sttActive: providerLabel(sttConfig(s).provider),
     companyName: s.companyName,
     teamMembers: s.teamMembers,
     language: s.language,
@@ -283,7 +296,7 @@ async function handleSegmentDone(req, res, url, meeting) {
     await saveMeeting(meeting);
     // Suhbat davom etayotganda ham tayyor qismlarni transkripsiya qilib boramiz — oxirida kutish qisqaradi.
     const s = readSettings();
-    if (seg.bytes > 0 && (s.elevenlabsApiKey || DEMO))
+    if (seg.bytes > 0 && (sttConfig(s).apiKey || DEMO))
       transcribeSegment(meeting.id, index).catch(() => {});
   }
   send(res, 200, { ok: true });
@@ -350,14 +363,14 @@ async function api(req, res, url) {
     const s = readSettings();
     if (DEMO)
       return send(res, 200, {
-        elevenlabs: { ok: true, message: 'Sinov rejimi' },
+        stt: { ok: true, message: 'Sinov rejimi' },
         anthropic: { ok: true, message: 'Sinov rejimi' },
       });
-    const [elevenlabs, anthropic] = await Promise.all([
-      checkElevenlabs(s.elevenlabsApiKey),
-      checkAnthropic(s.anthropicApiKey),
-    ]);
-    return send(res, 200, { elevenlabs, anthropic });
+    const [stt, anthropic] = await Promise.all([checkStt(s), checkAnthropic(s.anthropicApiKey)]);
+    return send(res, 200, {
+      stt: { ...stt, provider: providerLabel(sttConfig(s).provider) },
+      anthropic,
+    });
   }
   if (parts[1] === 'upload' && m === 'POST') return handleUpload(req, res, url);
   if (parts[1] === 'meetings' && parts.length === 2 && m === 'POST') {
@@ -462,6 +475,19 @@ async function route(req, res) {
       res,
       meetingFile(mm[1], mm[2]),
       url.searchParams.has('download') ? { download: `${mm[1]}-${mm[2]}` } : {},
+    );
+  }
+  // /m/<id>/audio/<fayl> — yozib olingan audio bo'laklarni eshitish/yuklab olish
+  const am = url.pathname.match(/^\/m\/([^/]+)\/audio\/([^/]+)$/);
+  if (am) {
+    if (!isValidMeetingId(am[1])) throw new HttpError(404, 'Topilmadi');
+    const meeting = await loadMeeting(am[1]).catch(() => null);
+    const seg = meeting?.segments.find((s) => s.file === am[2]);
+    if (!seg) throw new HttpError(404, 'Topilmadi');
+    return serveFile(
+      res,
+      meetingFile(am[1], `audio/${seg.file}`),
+      url.searchParams.has('download') ? { download: `${am[1]}-${seg.file}` } : {},
     );
   }
   const rel = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
