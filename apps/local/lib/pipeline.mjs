@@ -1,7 +1,7 @@
 // Suhbatni qayta ishlash zanjiri: audio bo'laklar → transkript → tahlil → prezentatsiya.
 import fsp from 'node:fs/promises';
 import { loadMeeting, saveMeeting, meetingFile, readSettings } from './store.mjs';
-import { transcribeFile, wordsToUtterances } from './stt.mjs';
+import { transcribeWith, wordsToUtterances } from './stt.mjs';
 import { analyzeTranscript } from './analyze.mjs';
 import { renderPresentation, renderMarkdown } from './presentation.mjs';
 import { demoWords, DEMO_ANALYSIS } from './demo.mjs';
@@ -66,10 +66,7 @@ async function runStt(meeting, seg, settings) {
   let lastErr;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      return await transcribeFile(meetingFile(meeting.id, `audio/${seg.file}`), {
-        apiKey: settings.elevenlabsApiKey,
-        language: settings.language,
-      });
+      return await transcribeWith(settings, meetingFile(meeting.id, `audio/${seg.file}`));
     } catch (err) {
       lastErr = err;
       if (err.retryable === false) break;
